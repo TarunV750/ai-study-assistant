@@ -1,0 +1,300 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Phase 2 foundation for the Cloud-Based AI Study Assistant: dedicated Lambda
+  execution roles and CloudWatch log groups. Application resources are added in
+  later phases.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: ai-study-assistant
+    AllowedPattern: "^[a-z][a-z0-9-]{2,24}$"
+    ConstraintDescription: >-
+      Use 3-25 lowercase letters, numbers, or hyphens, beginning with a letter.
+
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+
+  LogRetentionDays:
+    Type: Number
+    Default: 14
+    AllowedValues:
+      - 1
+      - 3
+      - 5
+      - 7
+      - 14
+      - 30
+      - 60
+      - 90
+      - 120
+      - 150
+      - 180
+      - 365
+      - 400
+      - 545
+      - 731
+      - 1096
+      - 1827
+      - 2192
+      - 2557
+      - 2922
+      - 3288
+      - 3653
+
+  PermissionsBoundaryArn:
+    Type: String
+    Default: ""
+    Description: >-
+      Optional IAM permissions-boundary ARN required by some school or company
+      AWS accounts. Leave blank in a personal sandbox account.
+
+Conditions:
+  HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+
+Resources:
+  CreateUploadUrlLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${ProjectName}-${Environment}-create-upload-url"
+      RetentionInDays: !Ref LogRetentionDays
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  ProcessDocumentLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${ProjectName}-${Environment}-process-document"
+      RetentionInDays: !Ref LogRetentionDays
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  AskQuestionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${ProjectName}-${Environment}-ask-question"
+      RetentionInDays: !Ref LogRetentionDays
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  GenerateQuestionsLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${ProjectName}-${Environment}-generate-questions"
+      RetentionInDays: !Ref LogRetentionDays
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  ManageDocumentsLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${ProjectName}-${Environment}-manage-documents"
+      RetentionInDays: !Ref LogRetentionDays
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  CreateUploadUrlRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Execution role for creating document upload URLs
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: WriteOwnCloudWatchLogs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "${CreateUploadUrlLogGroup.Arn}:*"
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  ProcessDocumentRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Execution role for asynchronous PDF processing
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: WriteOwnCloudWatchLogs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "${ProcessDocumentLogGroup.Arn}:*"
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  AskQuestionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Execution role for retrieval-augmented question answering
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: WriteOwnCloudWatchLogs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "${AskQuestionLogGroup.Arn}:*"
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  GenerateQuestionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Execution role for grounded practice-question generation
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: WriteOwnCloudWatchLogs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "${GenerateQuestionsLogGroup.Arn}:*"
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  ManageDocumentsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Execution role for listing and deleting documents
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: WriteOwnCloudWatchLogs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "${ManageDocumentsLogGroup.Arn}:*"
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+Outputs:
+  CreateUploadUrlRoleArn:
+    Description: Execution role ARN for the upload-URL Lambda
+    Value: !GetAtt CreateUploadUrlRole.Arn
+
+  ProcessDocumentRoleArn:
+    Description: Execution role ARN for the document-processing Lambda
+    Value: !GetAtt ProcessDocumentRole.Arn
+
+  AskQuestionRoleArn:
+    Description: Execution role ARN for the question-answering Lambda
+    Value: !GetAtt AskQuestionRole.Arn
+
+  GenerateQuestionsRoleArn:
+    Description: Execution role ARN for the question-generation Lambda
+    Value: !GetAtt GenerateQuestionsRole.Arn
+
+  ManageDocumentsRoleArn:
+    Description: Execution role ARN for the document-management Lambda
+    Value: !GetAtt ManageDocumentsRole.Arn
+
+  LogGroupNames:
+    Description: CloudWatch log groups created for the five future Lambdas
+    Value: !Join
+      - ","
+      - - !Ref CreateUploadUrlLogGroup
+        - !Ref ProcessDocumentLogGroup
+        - !Ref AskQuestionLogGroup
+        - !Ref GenerateQuestionsLogGroup
+        - !Ref ManageDocumentsLogGroup
