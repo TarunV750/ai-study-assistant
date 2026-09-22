@@ -3,10 +3,10 @@
 A portfolio project for uploading course PDFs and asking grounded questions about
 their contents using retrieval-augmented generation (RAG) on AWS.
 
-> **Current status:** Phase 2 foundation is implemented. The repository now has
-> deployable CloudFormation for per-function IAM roles and CloudWatch log
-> groups. No Lambda, storage, OpenSearch, Bedrock, API, or RAG behavior is
-> claimed to be implemented yet.
+> **Current status:** Phase 2 foundation is deployed and verified in the `dev`
+> environment in `us-east-1`. The stack contains per-function IAM roles and
+> CloudWatch log groups. No Lambda, storage, OpenSearch, Bedrock, API, or RAG
+> behavior is claimed to be implemented yet.
 
 ## Planned capabilities
 
@@ -101,6 +101,9 @@ Phase 2 deployment and verification commands are documented in
 [`infrastructure/README.md`](infrastructure/README.md). AWS deployment has to be
 performed with authenticated CLI credentials for the intended development
 account.
+
+The non-sensitive verification record for the deployed development stack is in
+[`docs/deployments/phase-2-dev.md`](docs/deployments/phase-2-dev.md).
 
 ## Delivery roadmap
 
