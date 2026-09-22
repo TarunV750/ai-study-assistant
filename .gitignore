@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+coverage.xml
+.coverage
+htmlcov/
+
+# JavaScript / React
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# AWS and infrastructure tooling
+.aws-sam/
+.terraform/
+*.tfstate
+*.tfstate.*
+cdk.out/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Build artifacts
+build/
+*.zip
