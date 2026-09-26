@@ -1,8 +1,8 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
-  Phase 2 foundation for the Cloud-Based AI Study Assistant: dedicated Lambda
-  execution roles and CloudWatch log groups. Application resources are added in
-  later phases.
+  AWS foundation for the Cloud-Based AI Study Assistant, including dedicated
+  execution roles, CloudWatch logs, private document storage, and secure PDF
+  upload instructions.
 
 Parameters:
   ProjectName:
@@ -54,10 +54,105 @@ Parameters:
       Optional IAM permissions-boundary ARN required by some school or company
       AWS accounts. Leave blank in a personal sandbox account.
 
+  LambdaArtifactBucketName:
+    Type: String
+    Description: S3 bucket containing the packaged create-upload-url Lambda
+
+  CreateUploadUrlArtifactKey:
+    Type: String
+    Description: S3 object key for the packaged create-upload-url Lambda
+
+  FrontendOrigin:
+    Type: String
+    Default: http://localhost:5173
+    Description: Exact browser origin allowed to submit presigned S3 POST uploads
+    MinLength: 1
+
+  MaxUploadSizeBytes:
+    Type: Number
+    Default: 10485760
+    MinValue: 1
+    MaxValue: 52428800
+    Description: Maximum accepted PDF size; defaults to 10 MiB
+
+  UploadUrlExpirationSeconds:
+    Type: Number
+    Default: 300
+    MinValue: 60
+    MaxValue: 900
+    Description: Lifetime of a generated S3 upload form
+
 Conditions:
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
 
 Resources:
+  DocumentsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - "*"
+            AllowedMethods:
+              - POST
+            AllowedOrigins:
+              - !Ref FrontendOrigin
+            ExposedHeaders:
+              - ETag
+              - x-amz-request-id
+            MaxAge: 300
+      LifecycleConfiguration:
+        Rules:
+          - Id: AbortIncompleteMultipartUploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: DataClassification
+          Value: private-course-material
+
+  DocumentsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref DocumentsBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: s3:*
+            Resource:
+              - !GetAtt DocumentsBucket.Arn
+              - !Sub "${DocumentsBucket.Arn}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+          - Sid: DenyUploadsWithoutSseS3
+            Effect: Deny
+            Principal: "*"
+            Action: s3:PutObject
+            Resource: !Sub "${DocumentsBucket.Arn}/uploads/*"
+            Condition:
+              StringNotEquals:
+                s3:x-amz-server-side-encryption: AES256
+
   CreateUploadUrlLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
@@ -138,6 +233,42 @@ Resources:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Resource: !Sub "${CreateUploadUrlLogGroup.Arn}:*"
+        - PolicyName: CreatePdfUploads
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub "${DocumentsBucket.Arn}/uploads/*"
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  CreateUploadUrlFunction:
+    Type: AWS::Lambda::Function
+    DependsOn:
+      - CreateUploadUrlLogGroup
+      - DocumentsBucketPolicy
+    Properties:
+      FunctionName: !Sub "${ProjectName}-${Environment}-create-upload-url"
+      Description: Validates PDF metadata and returns a constrained S3 presigned POST
+      Architectures:
+        - arm64
+      Code:
+        S3Bucket: !Ref LambdaArtifactBucketName
+        S3Key: !Ref CreateUploadUrlArtifactKey
+      Environment:
+        Variables:
+          DOCUMENTS_BUCKET_NAME: !Ref DocumentsBucket
+          MAX_UPLOAD_SIZE_BYTES: !Ref MaxUploadSizeBytes
+          UPLOAD_URL_EXPIRATION_SECONDS: !Ref UploadUrlExpirationSeconds
+      Handler: handler.lambda_handler
+      MemorySize: 128
+      Role: !GetAtt CreateUploadUrlRole.Arn
+      Runtime: python3.12
+      Timeout: 10
       Tags:
         - Key: Project
           Value: !Ref ProjectName
@@ -269,6 +400,18 @@ Resources:
           Value: !Ref Environment
 
 Outputs:
+  DocumentsBucketName:
+    Description: Private bucket containing uploaded course PDFs
+    Value: !Ref DocumentsBucket
+
+  CreateUploadUrlFunctionName:
+    Description: Lambda that creates constrained PDF upload forms
+    Value: !Ref CreateUploadUrlFunction
+
+  CreateUploadUrlFunctionArn:
+    Description: ARN of the PDF upload-form Lambda
+    Value: !GetAtt CreateUploadUrlFunction.Arn
+
   CreateUploadUrlRoleArn:
     Description: Execution role ARN for the upload-URL Lambda
     Value: !GetAtt CreateUploadUrlRole.Arn
