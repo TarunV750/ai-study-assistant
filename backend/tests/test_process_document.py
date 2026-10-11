@@ -11,7 +11,6 @@ from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
 from functions.process_document import handler
 
-
 DOCUMENT_ID = "123e4567-e89b-42d3-a456-426614174000"
 UPLOAD_KEY = f"uploads/{DOCUMENT_ID}/document.pdf"
 BUCKET = "private-documents-bucket"
@@ -107,6 +106,9 @@ class ProcessDocumentTests(unittest.TestCase):
                 "MAX_UPLOAD_SIZE_BYTES": "10485760",
                 "MAX_PDF_PAGES": "200",
                 "MAX_EXTRACTED_CHARACTERS": "2000000",
+                "CHUNK_SIZE_CHARACTERS": "1200",
+                "CHUNK_OVERLAP_CHARACTERS": "200",
+                "MAX_CHUNKS_PER_DOCUMENT": "5000",
             },
             clear=False,
         )
@@ -122,19 +124,63 @@ class ProcessDocumentTests(unittest.TestCase):
         self.assertEqual(item["ContentType"], "application/json")
         return json.loads(item["Body"])
 
-    def test_extracts_page_aware_text_and_writes_status_last(self):
+    def test_extracts_and_chunks_page_aware_text_and_writes_status_last(self):
         response = handler.lambda_handler(event_for(len(self.pdf)), Context())
 
-        self.assertEqual(response["status"], "EXTRACTED")
+        self.assertEqual(response["status"], "CHUNKED")
         self.assertEqual(response["pageCount"], 2)
+        self.assertEqual(response["chunkCount"], 2)
         extracted_key = f"processing/{DOCUMENT_ID}/extracted.json"
+        chunks_key = f"processing/{DOCUMENT_ID}/chunks.json"
         status_key = f"processing/{DOCUMENT_ID}/status.json"
-        self.assertEqual([call["Key"] for call in self.client.puts], [extracted_key, status_key])
+        self.assertEqual(
+            [call["Key"] for call in self.client.puts],
+            [extracted_key, chunks_key, status_key],
+        )
 
         extracted = self.stored_json(extracted_key)
         self.assertEqual(extracted["source"]["originalFilename"], "Lecture 1.pdf")
         self.assertEqual(extracted["pages"][0], {"pageNumber": 1, "text": "First page"})
         self.assertEqual(extracted["pages"][1], {"pageNumber": 2, "text": "Second page"})
+
+        chunked = self.stored_json(chunks_key)
+        self.assertEqual(chunked["status"], "CHUNKED")
+        self.assertEqual(chunked["strategy"]["pageBoundaryBehavior"], "preserve")
+        self.assertEqual(
+            [chunk["pageNumber"] for chunk in chunked["chunks"]],
+            [1, 2],
+        )
+
+    def test_rejects_document_that_exceeds_chunk_limit(self):
+        long_pdf = make_pdf(["word " * 100])
+        self.client = FakeS3Client(long_pdf)
+        handler._s3_client = self.client
+
+        with patch.dict(
+            os.environ,
+            {
+                "CHUNK_SIZE_CHARACTERS": "40",
+                "CHUNK_OVERLAP_CHARACTERS": "10",
+                "MAX_CHUNKS_PER_DOCUMENT": "2",
+            },
+        ):
+            response = handler.lambda_handler(event_for(len(long_pdf)), Context())
+
+        self.assertEqual(response["error"]["code"], "TOO_MANY_CHUNKS")
+        self.assertEqual(
+            [call["Key"] for call in self.client.puts],
+            [f"processing/{DOCUMENT_ID}/status.json"],
+        )
+
+    def test_invalid_chunk_configuration_fails_for_operator_attention(self):
+        with patch.dict(
+            os.environ,
+            {"CHUNK_SIZE_CHARACTERS": "100", "CHUNK_OVERLAP_CHARACTERS": "100"},
+        ):
+            with self.assertRaisesRegex(ValueError, "smaller than"):
+                handler.lambda_handler(event_for(len(self.pdf)), Context())
+
+        self.assertEqual(self.client.puts, [])
 
     def test_rejects_non_pdf_bytes_and_records_failure(self):
         self.client = FakeS3Client(b"plain text masquerading as a PDF")

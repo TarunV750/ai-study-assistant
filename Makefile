@@ -15,8 +15,9 @@ CREATE_UPLOAD_HASH := $(shell shasum -a 256 $(CREATE_UPLOAD_SOURCE) | cut -c1-16
 CREATE_UPLOAD_KEY := lambdas/create-upload-url/$(CREATE_UPLOAD_HASH).zip
 CREATE_UPLOAD_ZIP := build/create-upload-url.zip
 PROCESS_DOCUMENT_SOURCE := backend/functions/process_document/handler.py
+CHUNKING_SOURCE := backend/shared/chunking.py
 PROCESS_DOCUMENT_REQUIREMENTS := backend/functions/process_document/requirements.txt
-PROCESS_DOCUMENT_HASH := $(shell shasum -a 256 $(PROCESS_DOCUMENT_SOURCE) $(PROCESS_DOCUMENT_REQUIREMENTS) | shasum -a 256 | cut -c1-16)
+PROCESS_DOCUMENT_HASH := $(shell shasum -a 256 $(PROCESS_DOCUMENT_SOURCE) $(CHUNKING_SOURCE) $(PROCESS_DOCUMENT_REQUIREMENTS) | shasum -a 256 | cut -c1-16)
 PROCESS_DOCUMENT_KEY := lambdas/process-document/$(PROCESS_DOCUMENT_HASH).zip
 PROCESS_DOCUMENT_ZIP := build/process-document.zip
 BACKEND_TEST_DEPS := build/backend-test-deps
@@ -76,6 +77,9 @@ process-document-package:
 	$(PYTHON) -m pip install --disable-pip-version-check --no-compile \
 		--target build/lambda-process-document -r $(PROCESS_DOCUMENT_REQUIREMENTS)
 	cp $(PROCESS_DOCUMENT_SOURCE) build/lambda-process-document/handler.py
+	mkdir -p build/lambda-process-document/shared
+	cp $(CHUNKING_SOURCE) build/lambda-process-document/shared/chunking.py
+	touch build/lambda-process-document/shared/__init__.py
 	cd build/lambda-process-document && zip -qr ../process-document.zip .
 
 lambda-package: create-upload-package process-document-package

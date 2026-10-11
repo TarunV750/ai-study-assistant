@@ -1,4 +1,4 @@
-"""Validate uploaded PDFs and extract page-aware text into private S3 objects."""
+"""Validate uploaded PDFs and create page-aware text and chunks in private S3."""
 
 from __future__ import annotations
 
@@ -7,9 +7,11 @@ import json
 import logging
 import os
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import unquote
+
+from shared.chunking import ChunkingConfig, ChunkLimitExceeded, chunk_pages
 
 LOGGER = logging.getLogger(__name__)
 LOGGER.setLevel(logging.INFO)
@@ -18,6 +20,9 @@ PDF_CONTENT_TYPE = "application/pdf"
 DEFAULT_MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
 DEFAULT_MAX_PDF_PAGES = 200
 DEFAULT_MAX_EXTRACTED_CHARACTERS = 2_000_000
+DEFAULT_CHUNK_SIZE_CHARACTERS = 1_200
+DEFAULT_CHUNK_OVERLAP_CHARACTERS = 200
+DEFAULT_MAX_CHUNKS_PER_DOCUMENT = 5_000
 UPLOAD_KEY_PATTERN = re.compile(
     r"^uploads/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})/document\.pdf$"
 )
@@ -52,7 +57,7 @@ def _log(event_name: str, **details: Any) -> None:
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _parse_event(event: dict[str, Any], expected_bucket: str) -> dict[str, Any]:
@@ -183,6 +188,7 @@ def _process_document(
     max_size_bytes: int,
     max_pages: int,
     max_characters: int,
+    chunking_config: ChunkingConfig,
 ) -> dict[str, Any]:
     bucket = source["bucket"]
     key = source["key"]
@@ -219,6 +225,15 @@ def _process_document(
             max_pages=max_pages,
             max_characters=max_characters,
         )
+        try:
+            chunks = chunk_pages(
+                pages,
+                document_id=document_id,
+                config=chunking_config,
+            )
+        except ChunkLimitExceeded as error:
+            raise DocumentRejected("TOO_MANY_CHUNKS", str(error)) from error
+
         extracted_key = f"processing/{document_id}/extracted.json"
         extracted = {
             "schemaVersion": 1,
@@ -241,14 +256,34 @@ def _process_document(
         }
         _put_json(s3_client, bucket=bucket, key=extracted_key, body=extracted)
 
+        chunks_key = f"processing/{document_id}/chunks.json"
+        chunked = {
+            "schemaVersion": 1,
+            "documentId": document_id,
+            "status": "CHUNKED",
+            "sourceExtractedKey": extracted_key,
+            "strategy": {
+                "unit": "characters",
+                "maxCharacters": chunking_config.max_characters,
+                "overlapCharacters": chunking_config.overlap_characters,
+                "pageBoundaryBehavior": "preserve",
+            },
+            "chunkCount": len(chunks),
+            "chunks": chunks,
+            "chunkedAt": _utc_now(),
+        }
+        _put_json(s3_client, bucket=bucket, key=chunks_key, body=chunked)
+
         status = {
             "schemaVersion": 1,
             "documentId": document_id,
-            "status": "EXTRACTED",
+            "status": "CHUNKED",
             "sourceKey": key,
             "extractedKey": extracted_key,
+            "chunksKey": chunks_key,
             "pageCount": len(pages),
             "characterCount": character_count,
+            "chunkCount": len(chunks),
             "updatedAt": _utc_now(),
         }
         _put_json(s3_client, bucket=bucket, key=status_key, body=status)
@@ -272,6 +307,25 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             "MAX_EXTRACTED_CHARACTERS", str(DEFAULT_MAX_EXTRACTED_CHARACTERS)
         )
     )
+    chunking_config = ChunkingConfig(
+        max_characters=int(
+            os.environ.get(
+                "CHUNK_SIZE_CHARACTERS", str(DEFAULT_CHUNK_SIZE_CHARACTERS)
+            )
+        ),
+        overlap_characters=int(
+            os.environ.get(
+                "CHUNK_OVERLAP_CHARACTERS",
+                str(DEFAULT_CHUNK_OVERLAP_CHARACTERS),
+            )
+        ),
+        max_chunks=int(
+            os.environ.get(
+                "MAX_CHUNKS_PER_DOCUMENT", str(DEFAULT_MAX_CHUNKS_PER_DOCUMENT)
+            )
+        ),
+    )
+    chunking_config.validate()
 
     try:
         source = _parse_event(event, bucket_name)
@@ -286,13 +340,15 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             max_size_bytes=max_size_bytes,
             max_pages=max_pages,
             max_characters=max_characters,
+            chunking_config=chunking_config,
         )
         _log(
-            "document_extracted",
+            "document_chunked",
             request_id=request_id,
             document_id=source["document_id"],
             page_count=status["pageCount"],
             character_count=status["characterCount"],
+            chunk_count=status["chunkCount"],
         )
         return status
     except DocumentRejected as error:

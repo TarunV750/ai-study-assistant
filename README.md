@@ -3,10 +3,10 @@
 A portfolio project for uploading course PDFs and asking grounded questions about
 their contents using retrieval-augmented generation (RAG) on AWS.
 
-> **Current status:** Phase 4 event-driven PDF extraction is implemented and
+> **Current status:** Phase 5 configurable text chunking is implemented and
 > deployed in the `dev` environment.
 > The `dev` deployment status and live verification evidence are recorded in
-> [`docs/deployments/phase-4-dev.md`](docs/deployments/phase-4-dev.md).
+> [`docs/deployments/phase-5-dev.md`](docs/deployments/phase-5-dev.md).
 
 ## Planned capabilities
 
@@ -66,9 +66,9 @@ flowchart LR
     L --> C
 ```
 
-Private storage, presigned PDF upload, and event-driven PDF extraction are
-implemented. Chunking, API Gateway, Bedrock, OpenSearch, and the React client
-remain later phases.
+Private storage, presigned PDF upload, event-driven PDF extraction, and
+page-aware overlapping chunking are implemented. API Gateway, Bedrock,
+OpenSearch, and the React client remain later phases.
 
 ## Prerequisites for later phases
 
@@ -91,13 +91,14 @@ make infra-lint
 make infra-validate AWS_REGION=us-east-1
 ```
 
-These commands run 16 unit tests across both Lambda handlers, lint both
+These commands run 25 unit tests across both Lambda handlers and shared
+chunking logic, lint both
 CloudFormation templates, and ask AWS to validate them. Install the
 infrastructure development requirements before linting. Use Python 3.12 or
 newer for development work.
 
-Phase 4 design details are documented in
-[`docs/phase-4-pdf-extraction.md`](docs/phase-4-pdf-extraction.md). Deployment
+Phase 5 design details are documented in
+[`docs/phase-5-text-chunking.md`](docs/phase-5-text-chunking.md). Deployment
 and verification commands are documented in
 [`infrastructure/README.md`](infrastructure/README.md). AWS deployment has to be
 performed with authenticated CLI credentials for the intended development

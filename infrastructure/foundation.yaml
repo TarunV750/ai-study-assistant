@@ -2,7 +2,7 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
   AWS foundation for the Cloud-Based AI Study Assistant, including dedicated
   execution roles, CloudWatch logs, private document storage, and secure PDF
-  upload instructions, and event-driven PDF text extraction.
+  upload instructions, event-driven PDF extraction, and page-aware chunking.
 
 Parameters:
   ProjectName:
@@ -99,6 +99,27 @@ Parameters:
     MinValue: 1
     MaxValue: 10000000
     Description: Maximum extracted characters retained for one document
+
+  ChunkSizeCharacters:
+    Type: Number
+    Default: 1200
+    MinValue: 100
+    MaxValue: 10000
+    Description: Maximum characters in one page-aware text chunk
+
+  ChunkOverlapCharacters:
+    Type: Number
+    Default: 200
+    MinValue: 0
+    MaxValue: 9999
+    Description: Characters repeated between adjacent chunks on the same page
+
+  MaxChunksPerDocument:
+    Type: Number
+    Default: 5000
+    MinValue: 1
+    MaxValue: 20000
+    Description: Maximum chunks produced for one document
 
 Conditions:
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
@@ -348,7 +369,7 @@ Resources:
       - DocumentsBucketPolicy
     Properties:
       FunctionName: !Sub "${ProjectName}-${Environment}-process-document"
-      Description: Validates uploaded PDFs and extracts page-aware text
+      Description: Validates PDFs and creates page-aware overlapping text chunks
       Architectures:
         - arm64
       Code:
@@ -360,6 +381,9 @@ Resources:
           MAX_UPLOAD_SIZE_BYTES: !Ref MaxUploadSizeBytes
           MAX_PDF_PAGES: !Ref MaxPdfPages
           MAX_EXTRACTED_CHARACTERS: !Ref MaxExtractedCharacters
+          CHUNK_SIZE_CHARACTERS: !Ref ChunkSizeCharacters
+          CHUNK_OVERLAP_CHARACTERS: !Ref ChunkOverlapCharacters
+          MAX_CHUNKS_PER_DOCUMENT: !Ref MaxChunksPerDocument
       Handler: handler.lambda_handler
       MemorySize: 512
       Role: !GetAtt ProcessDocumentRole.Arn

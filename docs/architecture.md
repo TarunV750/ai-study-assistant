@@ -14,12 +14,12 @@ The project is split into four primary boundaries:
 Uploads travel directly from the browser to a private S3 bucket using a
 short-lived presigned POST. S3 publishes Object Created events to EventBridge,
 whose prefix-filtered rule invokes the processing Lambda. The processor
-validates each object and writes page-aware extracted text plus a status record
-back to a separate S3 prefix. This upload and extraction path is implemented.
+validates each object and writes page-aware extracted text, overlapping chunks,
+and a status record back to a separate S3 prefix. This upload, extraction, and
+chunking path is implemented.
 
-Later phases will split extracted text into overlapping chunks, request
-embeddings from Amazon Bedrock, and index text plus metadata in an Amazon
-OpenSearch Serverless vector search collection.
+Later phases will request embeddings from Amazon Bedrock and index chunks plus
+metadata in an Amazon OpenSearch Serverless vector search collection.
 
 For questions, an API Lambda embeds the query, runs semantic vector search in
 OpenSearch Serverless, builds a prompt from relevant chunks, and invokes a
@@ -43,3 +43,11 @@ The processing Lambda accepts only the generated
 file size, page count, and extracted characters; rejects encrypted and
 image-only documents; and preserves page numbers for later citations. The
 Lambda role reads only the upload prefix and writes only the processing prefix.
+
+## Implemented chunking boundary
+
+Chunking is character-based and configurable, with defaults of 1,200 maximum
+characters and 200 overlap characters. It prefers nearby whitespace, never
+combines two pages, skips empty pages, and stores zero-based source offsets.
+Deterministic chunk IDs make later indexing idempotent. A 5,000-chunk default
+limit bounds output size before the embedding stage.

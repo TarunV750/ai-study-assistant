@@ -5,7 +5,7 @@ The deployed development environment uses two stacks:
 
 - `artifacts.yaml` creates a private bucket for versioned Lambda ZIP files.
 - `foundation.yaml` creates the application roles, log groups, private document
-  bucket, upload Lambda, and event-driven PDF extraction Lambda.
+  bucket, upload Lambda, and event-driven PDF extraction/chunking Lambda.
 
 ## Secure upload flow
 
@@ -26,16 +26,16 @@ browser behavior; IAM and the signed POST policy provide authorization.
 1. S3 sends an Object Created event to Amazon EventBridge.
 2. An EventBridge rule accepts only keys under `uploads/` in this bucket.
 3. The processing Lambda validates the key, metadata, size, MIME type, and PDF
-   structure before extracting text.
+   structure before extracting and chunking text.
 4. Successful extraction writes page-aware text to
-   `processing/<document-id>/extracted.json`, then writes `status.json` last as
-   the completion marker.
+   `processing/<document-id>/extracted.json` and configurable overlapping text
+   to `chunks.json`, then writes `status.json` last as the completion marker.
 5. A permanently invalid document gets a structured `FAILED` status. Transient
    AWS errors are retried by EventBridge.
 
 The processing role can read only `uploads/*` and write only `processing/*`.
-Scanned image-only and password-protected PDFs are rejected in this phase; OCR
-and chunking are separate later phases.
+Scanned image-only and password-protected PDFs are rejected; OCR is outside the
+current pipeline.
 
 ## Validate and test
 
@@ -96,10 +96,13 @@ aws s3 cp s3://DOCUMENTS_BUCKET/processing/DOCUMENT_ID/status.json - \
   --profile YOUR_PROFILE --region us-east-1
 aws s3 cp s3://DOCUMENTS_BUCKET/processing/DOCUMENT_ID/extracted.json - \
   --profile YOUR_PROFILE --region us-east-1
+aws s3 cp s3://DOCUMENTS_BUCKET/processing/DOCUMENT_ID/chunks.json - \
+  --profile YOUR_PROFILE --region us-east-1
 ```
 
-An `EXTRACTED` status includes the page and character counts. A `FAILED` status
-contains a stable error code and safe message.
+A `CHUNKED` status includes page, character, and chunk counts. A `FAILED` status
+contains a stable error code and safe message. Chunk size, overlap, and maximum
+count are CloudFormation parameters.
 
 ## Costs and cleanup
 
