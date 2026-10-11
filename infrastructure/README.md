@@ -5,7 +5,8 @@ The deployed development environment uses two stacks:
 
 - `artifacts.yaml` creates a private bucket for versioned Lambda ZIP files.
 - `foundation.yaml` creates the application roles, log groups, private document
-  bucket, upload Lambda, and event-driven PDF extraction/chunking Lambda.
+  bucket, upload Lambda, PDF extraction/chunking Lambda, and Bedrock embedding
+  Lambda.
 
 ## Secure upload flow
 
@@ -37,6 +38,20 @@ The processing role can read only `uploads/*` and write only `processing/*`.
 Scanned image-only and password-protected PDFs are rejected; OCR is outside the
 current pipeline.
 
+## Embedding flow
+
+1. S3 publishes creation of `processing/<document-id>/chunks.json`.
+2. A suffix-filtered EventBridge rule invokes `generate-embeddings`.
+3. The Lambda validates the artifact and its deterministic chunk contract.
+4. Each chunk is sent to the configured Amazon Bedrock embedding model.
+5. The Lambda validates vector dimensions and finite values, then writes
+   `embeddings.json` and a final `EMBEDDED` status.
+
+The default is Amazon Titan Text Embeddings V2 with normalized 1,024-dimension
+vectors. The dedicated role can read only chunk and completion-status artifacts,
+write only embedding and status artifacts, and invoke only that configured
+foundation model.
+
 ## Validate and test
 
 ```bash
@@ -47,7 +62,8 @@ make backend-test
 make infra-validate AWS_PROFILE=YOUR_PROFILE AWS_REGION=us-east-1
 ```
 
-`backend-test` tests upload signing and PDF processing without contacting AWS.
+`backend-test` tests upload signing, PDF processing, chunking, and embedding
+behavior without contacting AWS.
 `infra-validate` performs local syntax/lint checks and AWS template validation.
 
 ## Deploy
@@ -67,10 +83,10 @@ make infra-deploy AWS_PROFILE=YOUR_PROFILE AWS_REGION=us-east-1
 The Make target:
 
 1. deploys the private artifact bucket;
-2. packages the upload and processing Lambdas, including the pinned `pypdf`
-   runtime dependency;
+2. packages the upload, processing, and embedding Lambdas, including the pinned
+   `pypdf` runtime dependency;
 3. uploads them under source-content hashes; and
-4. updates the foundation stack with both artifact locations.
+4. updates the foundation stack with all three artifact locations.
 
 For a production workflow, create and inspect a CloudFormation change set before
 execution. If an organization requires an IAM permissions boundary, pass
@@ -98,16 +114,18 @@ aws s3 cp s3://DOCUMENTS_BUCKET/processing/DOCUMENT_ID/extracted.json - \
   --profile YOUR_PROFILE --region us-east-1
 aws s3 cp s3://DOCUMENTS_BUCKET/processing/DOCUMENT_ID/chunks.json - \
   --profile YOUR_PROFILE --region us-east-1
+aws s3 cp s3://DOCUMENTS_BUCKET/processing/DOCUMENT_ID/embeddings.json - \
+  --profile YOUR_PROFILE --region us-east-1
 ```
 
-A `CHUNKED` status includes page, character, and chunk counts. A `FAILED` status
-contains a stable error code and safe message. Chunk size, overlap, and maximum
-count are CloudFormation parameters.
+An `EMBEDDED` status includes the model, dimensions, and chunk count. A `FAILED`
+status contains a stable error code, safe message, and failed stage. Chunk and
+embedding settings are CloudFormation parameters.
 
 ## Costs and cleanup
 
-S3 charges for storage and requests; Lambda and EventBridge may charge for
-processing; CloudWatch Logs charges for ingested and retained log data. At
+S3 charges for storage and requests; Lambda, EventBridge, and Amazon Bedrock may
+charge for processing; CloudWatch Logs charges for ingested and retained data. At
 portfolio-testing volume these should be small, but they are not guaranteed to
 be zero. Artifact objects expire after 30 days, and logs retain for 14 days.
 Uploaded documents and extracted text do not automatically expire.

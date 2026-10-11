@@ -3,17 +3,18 @@
 A portfolio project for uploading course PDFs and asking grounded questions about
 their contents using retrieval-augmented generation (RAG) on AWS.
 
-> **Current status:** Phase 5 configurable text chunking is implemented and
+> **Current status:** Phase 6 Amazon Bedrock embeddings are implemented and
 > deployed in the `dev` environment.
 > The `dev` deployment status and live verification evidence are recorded in
-> [`docs/deployments/phase-5-dev.md`](docs/deployments/phase-5-dev.md).
+> [`docs/deployments/phase-6-dev.md`](docs/deployments/phase-6-dev.md).
 
 ## Planned capabilities
 
 - Secure, direct-to-S3 PDF uploads using presigned URLs
 - Event-driven PDF extraction with AWS Lambda
 - Configurable, page-aware text chunking
-- Embeddings and response generation with Amazon Bedrock
+- Text embeddings with Amazon Bedrock
+- Grounded response generation with Amazon Bedrock
 - Semantic vector search with Amazon OpenSearch Serverless
 - Grounded answers with citations and explicit no-answer behavior
 - Summaries, study guides, and source-grounded practice questions
@@ -30,6 +31,7 @@ ai-study-assistant/
 │   ├── functions/            # One package per Lambda responsibility
 │   │   ├── ask_question/
 │   │   ├── create_upload_url/
+│   │   ├── generate_embeddings/
 │   │   ├── generate_questions/
 │   │   ├── manage_documents/
 │   │   └── process_document/
@@ -37,7 +39,7 @@ ai-study-assistant/
 │   └── tests/                # Backend unit tests
 ├── infrastructure/           # Reproducible AWS infrastructure
 │   ├── artifacts.yaml        # Private Lambda deployment-package storage
-│   └── foundation.yaml       # S3, IAM, logs, upload and processing Lambdas
+│   └── foundation.yaml       # S3, IAM, events, and application Lambdas
 ├── docs/                     # Architecture and engineering decisions
 ├── .env.example              # Configuration names without credentials
 ├── .editorconfig
@@ -56,9 +58,10 @@ flowchart LR
     F --> A[Amazon API Gateway]
     A --> L[AWS Lambda APIs]
     F -->|presigned upload| S[(Private Amazon S3 bucket)]
-    S -->|object-created event| P[Document processing Lambda]
-    P --> B[Amazon Bedrock embeddings]
-    P --> O[(Amazon OpenSearch Serverless<br/>vector search collection)]
+    S -->|PDF created| P[Document processing Lambda]
+    P -->|chunks created| E[Embedding Lambda]
+    E --> B[Amazon Bedrock embeddings]
+    E --> O[(Amazon OpenSearch Serverless<br/>vector search collection)]
     L --> B
     L --> O
     L --> G[Amazon Bedrock generation model]
@@ -66,9 +69,9 @@ flowchart LR
     L --> C
 ```
 
-Private storage, presigned PDF upload, event-driven PDF extraction, and
-page-aware overlapping chunking are implemented. API Gateway, Bedrock,
-OpenSearch, and the React client remain later phases.
+Private storage, presigned PDF upload, event-driven extraction, page-aware
+chunking, and Amazon Bedrock embeddings are implemented. API Gateway,
+OpenSearch, grounded generation, and the React client remain later phases.
 
 ## Prerequisites for later phases
 
@@ -91,15 +94,14 @@ make infra-lint
 make infra-validate AWS_REGION=us-east-1
 ```
 
-These commands run 25 unit tests across both Lambda handlers and shared
-chunking logic, lint both
-CloudFormation templates, and ask AWS to validate them. Install the
+These commands run 33 unit tests across the Lambda handlers and shared chunking
+logic, lint both CloudFormation templates, and ask AWS to validate them. Install the
 infrastructure development requirements before linting. Use Python 3.12 or
 newer for development work.
 
-Phase 5 design details are documented in
-[`docs/phase-5-text-chunking.md`](docs/phase-5-text-chunking.md). Deployment
-and verification commands are documented in
+Phase 6 design details are documented in
+[`docs/phase-6-bedrock-embeddings.md`](docs/phase-6-bedrock-embeddings.md).
+Deployment and verification commands are documented in
 [`infrastructure/README.md`](infrastructure/README.md). AWS deployment has to be
 performed with authenticated CLI credentials for the intended development
 account.

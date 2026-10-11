@@ -15,11 +15,12 @@ Uploads travel directly from the browser to a private S3 bucket using a
 short-lived presigned POST. S3 publishes Object Created events to EventBridge,
 whose prefix-filtered rule invokes the processing Lambda. The processor
 validates each object and writes page-aware extracted text, overlapping chunks,
-and a status record back to a separate S3 prefix. This upload, extraction, and
-chunking path is implemented.
+and a status record back to a separate S3 prefix. Creating `chunks.json`
+triggers a separate embedding Lambda, which invokes Amazon Bedrock and writes
+validated vectors to `embeddings.json`. This path is implemented.
 
-Later phases will request embeddings from Amazon Bedrock and index chunks plus
-metadata in an Amazon OpenSearch Serverless vector search collection.
+Later phases will index chunks, vectors, and metadata in an Amazon OpenSearch
+Serverless vector search collection.
 
 For questions, an API Lambda embeds the query, runs semantic vector search in
 OpenSearch Serverless, builds a prompt from relevant chunks, and invokes a
@@ -51,3 +52,13 @@ characters and 200 overlap characters. It prefers nearby whitespace, never
 combines two pages, skips empty pages, and stores zero-based source offsets.
 Deterministic chunk IDs make later indexing idempotent. A 5,000-chunk default
 limit bounds output size before the embedding stage.
+
+## Implemented embedding boundary
+
+The embedding Lambda accepts only `processing/<uuid>/chunks.json` events and
+waits for the matching `CHUNKED` completion status before making model calls.
+Its role can read only chunk and status artifacts, write only embedding and
+status artifacts, and invoke only the configured foundation model. The default Titan Text
+Embeddings V2 request produces normalized 1,024-dimensional vectors. Model ID,
+dimensions, normalization, maximum chunks, and input artifact size are
+deployment configuration.

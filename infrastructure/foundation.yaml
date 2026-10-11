@@ -2,7 +2,7 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
   AWS foundation for the Cloud-Based AI Study Assistant, including dedicated
   execution roles, CloudWatch logs, private document storage, and secure PDF
-  upload instructions, event-driven PDF extraction, and page-aware chunking.
+  upload instructions, PDF extraction, page-aware chunking, and Bedrock embeddings.
 
 Parameters:
   ProjectName:
@@ -66,6 +66,10 @@ Parameters:
     Type: String
     Description: S3 object key for the packaged process-document Lambda
 
+  GenerateEmbeddingsArtifactKey:
+    Type: String
+    Description: S3 object key for the packaged generate-embeddings Lambda
+
   FrontendOrigin:
     Type: String
     Default: http://localhost:5173
@@ -120,6 +124,43 @@ Parameters:
     MinValue: 1
     MaxValue: 20000
     Description: Maximum chunks produced for one document
+
+  EmbeddingModelId:
+    Type: String
+    Default: amazon.titan-embed-text-v2:0
+    AllowedPattern: "^[A-Za-z0-9._:-]+$"
+    Description: Amazon Bedrock text embedding model ID
+
+  EmbeddingDimensions:
+    Type: Number
+    Default: 1024
+    AllowedValues:
+      - 256
+      - 512
+      - 1024
+    Description: Vector dimensions requested from the embedding model
+
+  NormalizeEmbeddings:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Whether Bedrock should normalize generated vectors
+
+  MaxEmbeddingChunks:
+    Type: Number
+    Default: 500
+    MinValue: 1
+    MaxValue: 5000
+    Description: Maximum chunks embedded by one Lambda invocation
+
+  MaxChunksFileSizeBytes:
+    Type: Number
+    Default: 52428800
+    MinValue: 1
+    MaxValue: 104857600
+    Description: Maximum accepted size of one chunks.json artifact
 
 Conditions:
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
@@ -210,6 +251,17 @@ Resources:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub "/aws/lambda/${ProjectName}-${Environment}-process-document"
+      RetentionInDays: !Ref LogRetentionDays
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  GenerateEmbeddingsLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${ProjectName}-${Environment}-generate-embeddings"
       RetentionInDays: !Ref LogRetentionDays
       Tags:
         - Key: Project
@@ -427,6 +479,127 @@ Resources:
       Principal: events.amazonaws.com
       SourceArn: !GetAtt UploadedPdfEventRule.Arn
 
+  GenerateEmbeddingsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Execution role for generating Bedrock embeddings from text chunks
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: WriteOwnCloudWatchLogs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "${GenerateEmbeddingsLogGroup.Arn}:*"
+        - PolicyName: ReadChunkArtifacts
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource:
+                  - !Sub "${DocumentsBucket.Arn}/processing/*/chunks.json"
+                  - !Sub "${DocumentsBucket.Arn}/processing/*/status.json"
+        - PolicyName: WriteEmbeddingResults
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: s3:PutObject
+                Resource:
+                  - !Sub "${DocumentsBucket.Arn}/processing/*/embeddings.json"
+                  - !Sub "${DocumentsBucket.Arn}/processing/*/status.json"
+        - PolicyName: InvokeConfiguredEmbeddingModel
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: bedrock:InvokeModel
+                Resource: !Sub >-
+                  arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${EmbeddingModelId}
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  GenerateEmbeddingsFunction:
+    Type: AWS::Lambda::Function
+    DependsOn:
+      - GenerateEmbeddingsLogGroup
+      - DocumentsBucketPolicy
+    Properties:
+      FunctionName: !Sub "${ProjectName}-${Environment}-generate-embeddings"
+      Description: Creates normalized Bedrock vectors for page-aware text chunks
+      Architectures:
+        - arm64
+      Code:
+        S3Bucket: !Ref LambdaArtifactBucketName
+        S3Key: !Ref GenerateEmbeddingsArtifactKey
+      Environment:
+        Variables:
+          DOCUMENTS_BUCKET_NAME: !Ref DocumentsBucket
+          EMBEDDING_MODEL_ID: !Ref EmbeddingModelId
+          EMBEDDING_DIMENSIONS: !Ref EmbeddingDimensions
+          NORMALIZE_EMBEDDINGS: !Ref NormalizeEmbeddings
+          MAX_EMBEDDING_CHUNKS: !Ref MaxEmbeddingChunks
+          MAX_CHUNKS_FILE_SIZE_BYTES: !Ref MaxChunksFileSizeBytes
+      Handler: handler.lambda_handler
+      MemorySize: 512
+      Role: !GetAtt GenerateEmbeddingsRole.Arn
+      Runtime: python3.12
+      Timeout: 300
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  ChunkArtifactEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Routes completed chunk artifacts to Bedrock embedding generation
+      EventPattern:
+        source:
+          - aws.s3
+        detail-type:
+          - Object Created
+        detail:
+          bucket:
+            name:
+              - !Ref DocumentsBucket
+          object:
+            key:
+              - suffix: /chunks.json
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt GenerateEmbeddingsFunction.Arn
+          Id: GenerateChunkEmbeddings
+          RetryPolicy:
+            MaximumEventAgeInSeconds: 3600
+            MaximumRetryAttempts: 2
+
+  AllowEventBridgeToGenerateEmbeddings:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref GenerateEmbeddingsFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt ChunkArtifactEventRule.Arn
+
   AskQuestionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -548,6 +721,14 @@ Outputs:
   ProcessDocumentFunctionArn:
     Description: ARN of the asynchronous PDF processing Lambda
     Value: !GetAtt ProcessDocumentFunction.Arn
+
+  GenerateEmbeddingsFunctionName:
+    Description: Lambda that generates Bedrock vectors for document chunks
+    Value: !Ref GenerateEmbeddingsFunction
+
+  GenerateEmbeddingsFunctionArn:
+    Description: ARN of the document embedding Lambda
+    Value: !GetAtt GenerateEmbeddingsFunction.Arn
 
   AskQuestionRoleArn:
     Description: Execution role ARN for the question-answering Lambda
