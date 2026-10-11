@@ -6,7 +6,7 @@ The deployed development environment uses two stacks:
 - `artifacts.yaml` creates a private bucket for versioned Lambda ZIP files.
 - `foundation.yaml` creates the application roles, log groups, private document
   bucket, upload Lambda, PDF extraction/chunking Lambda, and Bedrock embedding
-  Lambda.
+  Lambda, plus the OpenSearch Serverless vector collection and policies.
 
 ## Secure upload flow
 
@@ -51,6 +51,26 @@ The default is Amazon Titan Text Embeddings V2 with normalized 1,024-dimension
 vectors. The dedicated role can read only chunk and completion-status artifacts,
 write only embedding and status artifacts, and invoke only that configured
 foundation model.
+
+## Vector-search foundation
+
+Phase 7 provisions a `VECTORSEARCH` collection, but intentionally does not
+create an index or write documents yet. Those are Phase 8 responsibilities.
+
+The collection uses:
+
+- a `NEXTGEN` collection group with indexing and search minimums of zero and
+  maximums of two OCUs each;
+- the next-generation group's required high-availability behavior and standard
+  vector-index path;
+- encryption with an AWS-owned key;
+- a publicly reachable API endpoint that still requires signed, authorized
+  requests; and
+- a data-access policy naming only the embedding role.
+
+The embedding role does not yet have `aoss:APIAccessAll`, so the Phase 7 policy
+does not grant it effective data-plane access on its own. Phase 8 will add only
+the IAM permission needed to create the index and write vectors.
 
 ## Validate and test
 
@@ -125,10 +145,12 @@ embedding settings are CloudFormation parameters.
 ## Costs and cleanup
 
 S3 charges for storage and requests; Lambda, EventBridge, and Amazon Bedrock may
-charge for processing; CloudWatch Logs charges for ingested and retained data. At
-portfolio-testing volume these should be small, but they are not guaranteed to
-be zero. Artifact objects expire after 30 days, and logs retain for 14 days.
-Uploaded documents and extracted text do not automatically expire.
+charge for processing; CloudWatch Logs charges for ingested and retained data.
+OpenSearch Serverless charges for active OCUs and stored data. Its configured
+minimum is zero while idle, but tests, indexing, and searches can activate paid
+capacity. Costs are not guaranteed to be zero. Artifact objects expire after 30
+days, and logs retain for 14 days. Uploaded documents and extracted text do not
+automatically expire.
 
 Empty the document bucket before deleting the foundation stack. Then remove the
 artifact stack:

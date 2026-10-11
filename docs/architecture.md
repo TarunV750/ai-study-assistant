@@ -19,8 +19,9 @@ and a status record back to a separate S3 prefix. Creating `chunks.json`
 triggers a separate embedding Lambda, which invokes Amazon Bedrock and writes
 validated vectors to `embeddings.json`. This path is implemented.
 
-Later phases will index chunks, vectors, and metadata in an Amazon OpenSearch
-Serverless vector search collection.
+The Amazon OpenSearch Serverless vector collection and its security policies are
+also provisioned. Later phases will create its vector index and write chunks,
+vectors, and metadata.
 
 For questions, an API Lambda embeds the query, runs semantic vector search in
 OpenSearch Serverless, builds a prompt from relevant chunks, and invokes a
@@ -62,3 +63,14 @@ status artifacts, and invoke only the configured foundation model. The default T
 Embeddings V2 request produces normalized 1,024-dimensional vectors. Model ID,
 dimensions, normalization, maximum chunks, and input artifact size are
 deployment configuration.
+
+## Implemented vector-search boundary
+
+The vector collection is attached to a next-generation collection group that
+can scale indexing and search capacity to zero while idle and caps each at two
+OCUs. It uses the next-generation group's required high-availability behavior,
+an AWS-owned encryption key, the standard vector-index path, and an
+authenticated public API endpoint. Public network
+reachability does not grant data access: the data policy names only the
+embedding role, which does not receive the required IAM data-plane permission
+until the indexing phase.

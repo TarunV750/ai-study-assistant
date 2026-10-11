@@ -2,7 +2,7 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
   AWS foundation for the Cloud-Based AI Study Assistant, including dedicated
   execution roles, CloudWatch logs, private document storage, and secure PDF
-  upload instructions, PDF extraction, page-aware chunking, and Bedrock embeddings.
+  upload instructions, PDF extraction, chunking, Bedrock embeddings, and vector search.
 
 Parameters:
   ProjectName:
@@ -161,6 +161,18 @@ Parameters:
     MinValue: 1
     MaxValue: 104857600
     Description: Maximum accepted size of one chunks.json artifact
+
+  VectorCollectionName:
+    Type: String
+    Default: ai-study-dev-vectors
+    AllowedPattern: "^[a-z][a-z0-9-]{2,27}$"
+    Description: Globally unique name of the OpenSearch Serverless vector collection
+
+  VectorCollectionGroupName:
+    Type: String
+    Default: ai-study-dev-vector-group
+    AllowedPattern: "^[a-z][a-z0-9-]{2,31}$"
+    Description: Name of the scale-to-zero OpenSearch Serverless collection group
 
 Conditions:
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
@@ -600,6 +612,79 @@ Resources:
       Principal: events.amazonaws.com
       SourceArn: !GetAtt ChunkArtifactEventRule.Arn
 
+  VectorCollectionGroup:
+    Type: AWS::OpenSearchServerless::CollectionGroup
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            - E3002
+            - E3034
+    Properties:
+      Name: !Ref VectorCollectionGroupName
+      Description: Capacity boundary for the study-assistant vector collection
+      Generation: NEXTGEN
+      StandbyReplicas: ENABLED
+      CapacityLimits:
+        MinIndexingCapacityInOcu: 0
+        MaxIndexingCapacityInOcu: 2
+        MinSearchCapacityInOcu: 0
+        MaxSearchCapacityInOcu: 2
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  VectorEncryptionPolicy:
+    Type: AWS::OpenSearchServerless::SecurityPolicy
+    Properties:
+      Name: !Sub "study-${Environment}-vec-encryption"
+      Type: encryption
+      Description: Encrypts the vector collection with an AWS-owned key
+      Policy: !Sub >-
+        {"Rules":[{"ResourceType":"collection","Resource":["collection/${VectorCollectionName}"]}],"AWSOwnedKey":true}
+
+  VectorNetworkPolicy:
+    Type: AWS::OpenSearchServerless::SecurityPolicy
+    Properties:
+      Name: !Sub "study-${Environment}-vec-network"
+      Type: network
+      Description: Allows authenticated API traffic to the vector collection endpoint
+      Policy: !Sub >-
+        [{"Description":"Authenticated API access","Rules":[{"ResourceType":"collection","Resource":["collection/${VectorCollectionName}"]}],"AllowFromPublic":true}]
+
+  VectorDataAccessPolicy:
+    Type: AWS::OpenSearchServerless::AccessPolicy
+    Properties:
+      Name: !Sub "study-${Environment}-vec-data"
+      Type: data
+      Description: Grants the embedding role collection and index data-plane access
+      Policy: !Sub >-
+        [{"Description":"Embedding pipeline vector access","Rules":[{"ResourceType":"collection","Resource":["collection/${VectorCollectionName}"],"Permission":["aoss:DescribeCollectionItems"]},{"ResourceType":"index","Resource":["index/${VectorCollectionName}/*"],"Permission":["aoss:CreateIndex","aoss:UpdateIndex","aoss:DescribeIndex","aoss:ReadDocument","aoss:WriteDocument"]}],"Principal":["${GenerateEmbeddingsRole.Arn}"]}]
+
+  VectorCollection:
+    Type: AWS::OpenSearchServerless::Collection
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            - E3002
+    DependsOn:
+      - VectorEncryptionPolicy
+      - VectorNetworkPolicy
+    Properties:
+      Name: !Ref VectorCollectionName
+      Description: Semantic vector search for study-assistant document chunks
+      Type: VECTORSEARCH
+      CollectionGroupName: !Ref VectorCollectionGroupName
+      DeletionProtection: DISABLED
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
   AskQuestionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -729,6 +814,26 @@ Outputs:
   GenerateEmbeddingsFunctionArn:
     Description: ARN of the document embedding Lambda
     Value: !GetAtt GenerateEmbeddingsFunction.Arn
+
+  VectorCollectionName:
+    Description: OpenSearch Serverless vector collection name
+    Value: !Ref VectorCollectionName
+
+  VectorCollectionId:
+    Description: OpenSearch Serverless vector collection ID
+    Value: !GetAtt VectorCollection.Id
+
+  VectorCollectionArn:
+    Description: OpenSearch Serverless vector collection ARN
+    Value: !GetAtt VectorCollection.Arn
+
+  VectorCollectionEndpoint:
+    Description: OpenSearch Serverless vector API endpoint
+    Value: !GetAtt VectorCollection.CollectionEndpoint
+
+  VectorCollectionGroupName:
+    Description: Scale-to-zero collection group name
+    Value: !Ref VectorCollectionGroupName
 
   AskQuestionRoleArn:
     Description: Execution role ARN for the question-answering Lambda

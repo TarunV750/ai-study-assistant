@@ -3,10 +3,11 @@
 A portfolio project for uploading course PDFs and asking grounded questions about
 their contents using retrieval-augmented generation (RAG) on AWS.
 
-> **Current status:** Phase 6 Amazon Bedrock embeddings are implemented and
+> **Current status:** Phase 7 Amazon OpenSearch Serverless vector infrastructure is
+> implemented and
 > deployed in the `dev` environment.
 > The `dev` deployment status and live verification evidence are recorded in
-> [`docs/deployments/phase-6-dev.md`](docs/deployments/phase-6-dev.md).
+> [`docs/deployments/phase-7-dev.md`](docs/deployments/phase-7-dev.md).
 
 ## Planned capabilities
 
@@ -70,8 +71,9 @@ flowchart LR
 ```
 
 Private storage, presigned PDF upload, event-driven extraction, page-aware
-chunking, and Amazon Bedrock embeddings are implemented. API Gateway,
-OpenSearch, grounded generation, and the React client remain later phases.
+chunking, Bedrock embeddings, and the OpenSearch Serverless vector collection
+are implemented. Vector indexing, API Gateway, grounded generation, and the
+React client remain later phases.
 
 ## Prerequisites for later phases
 
@@ -99,8 +101,8 @@ logic, lint both CloudFormation templates, and ask AWS to validate them. Install
 infrastructure development requirements before linting. Use Python 3.12 or
 newer for development work.
 
-Phase 6 design details are documented in
-[`docs/phase-6-bedrock-embeddings.md`](docs/phase-6-bedrock-embeddings.md).
+Phase 7 design details are documented in
+[`docs/phase-7-opensearch-serverless.md`](docs/phase-7-opensearch-serverless.md).
 Deployment and verification commands are documented in
 [`infrastructure/README.md`](infrastructure/README.md). AWS deployment has to be
 performed with authenticated CLI credentials for the intended development
