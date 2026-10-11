@@ -2,7 +2,7 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
   AWS foundation for the Cloud-Based AI Study Assistant, including dedicated
   execution roles, CloudWatch logs, private document storage, and secure PDF
-  upload instructions.
+  upload instructions, and event-driven PDF text extraction.
 
 Parameters:
   ProjectName:
@@ -56,11 +56,15 @@ Parameters:
 
   LambdaArtifactBucketName:
     Type: String
-    Description: S3 bucket containing the packaged create-upload-url Lambda
+    Description: S3 bucket containing packaged Lambda functions
 
   CreateUploadUrlArtifactKey:
     Type: String
     Description: S3 object key for the packaged create-upload-url Lambda
+
+  ProcessDocumentArtifactKey:
+    Type: String
+    Description: S3 object key for the packaged process-document Lambda
 
   FrontendOrigin:
     Type: String
@@ -81,6 +85,20 @@ Parameters:
     MinValue: 60
     MaxValue: 900
     Description: Lifetime of a generated S3 upload form
+
+  MaxPdfPages:
+    Type: Number
+    Default: 200
+    MinValue: 1
+    MaxValue: 1000
+    Description: Maximum number of PDF pages processed by one invocation
+
+  MaxExtractedCharacters:
+    Type: Number
+    Default: 2000000
+    MinValue: 1
+    MaxValue: 10000000
+    Description: Maximum extracted characters retained for one document
 
 Conditions:
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
@@ -111,6 +129,9 @@ Resources:
             Status: Enabled
             AbortIncompleteMultipartUpload:
               DaysAfterInitiation: 1
+      NotificationConfiguration:
+        EventBridgeConfiguration:
+          EventBridgeEnabled: true
       OwnershipControls:
         Rules:
           - ObjectOwnership: BucketOwnerEnforced
@@ -300,11 +321,87 @@ Resources:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Resource: !Sub "${ProcessDocumentLogGroup.Arn}:*"
+        - PolicyName: ReadUploadedPdfs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub "${DocumentsBucket.Arn}/uploads/*"
+        - PolicyName: WriteProcessingResults
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub "${DocumentsBucket.Arn}/processing/*"
       Tags:
         - Key: Project
           Value: !Ref ProjectName
         - Key: Environment
           Value: !Ref Environment
+
+  ProcessDocumentFunction:
+    Type: AWS::Lambda::Function
+    DependsOn:
+      - ProcessDocumentLogGroup
+      - DocumentsBucketPolicy
+    Properties:
+      FunctionName: !Sub "${ProjectName}-${Environment}-process-document"
+      Description: Validates uploaded PDFs and extracts page-aware text
+      Architectures:
+        - arm64
+      Code:
+        S3Bucket: !Ref LambdaArtifactBucketName
+        S3Key: !Ref ProcessDocumentArtifactKey
+      Environment:
+        Variables:
+          DOCUMENTS_BUCKET_NAME: !Ref DocumentsBucket
+          MAX_UPLOAD_SIZE_BYTES: !Ref MaxUploadSizeBytes
+          MAX_PDF_PAGES: !Ref MaxPdfPages
+          MAX_EXTRACTED_CHARACTERS: !Ref MaxExtractedCharacters
+      Handler: handler.lambda_handler
+      MemorySize: 512
+      Role: !GetAtt ProcessDocumentRole.Arn
+      Runtime: python3.12
+      Timeout: 60
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  UploadedPdfEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Routes new uploaded PDFs to the document processor
+      EventPattern:
+        source:
+          - aws.s3
+        detail-type:
+          - Object Created
+        detail:
+          bucket:
+            name:
+              - !Ref DocumentsBucket
+          object:
+            key:
+              - prefix: uploads/
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt ProcessDocumentFunction.Arn
+          Id: ProcessUploadedPdf
+          RetryPolicy:
+            MaximumEventAgeInSeconds: 3600
+            MaximumRetryAttempts: 2
+
+  AllowEventBridgeToProcessDocuments:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref ProcessDocumentFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt UploadedPdfEventRule.Arn
 
   AskQuestionRole:
     Type: AWS::IAM::Role
@@ -419,6 +516,14 @@ Outputs:
   ProcessDocumentRoleArn:
     Description: Execution role ARN for the document-processing Lambda
     Value: !GetAtt ProcessDocumentRole.Arn
+
+  ProcessDocumentFunctionName:
+    Description: Lambda that validates PDFs and extracts page-aware text
+    Value: !Ref ProcessDocumentFunction
+
+  ProcessDocumentFunctionArn:
+    Description: ARN of the asynchronous PDF processing Lambda
+    Value: !GetAtt ProcessDocumentFunction.Arn
 
   AskQuestionRoleArn:
     Description: Execution role ARN for the question-answering Lambda

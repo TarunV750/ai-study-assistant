@@ -1,4 +1,5 @@
 SHELL := /bin/sh
+PYTHON ?= python3.12
 
 AWS_REGION ?= us-east-1
 AWS_PROFILE ?=
@@ -13,13 +14,28 @@ CREATE_UPLOAD_SOURCE := backend/functions/create_upload_url/handler.py
 CREATE_UPLOAD_HASH := $(shell shasum -a 256 $(CREATE_UPLOAD_SOURCE) | cut -c1-16)
 CREATE_UPLOAD_KEY := lambdas/create-upload-url/$(CREATE_UPLOAD_HASH).zip
 CREATE_UPLOAD_ZIP := build/create-upload-url.zip
+PROCESS_DOCUMENT_SOURCE := backend/functions/process_document/handler.py
+PROCESS_DOCUMENT_REQUIREMENTS := backend/functions/process_document/requirements.txt
+PROCESS_DOCUMENT_HASH := $(shell shasum -a 256 $(PROCESS_DOCUMENT_SOURCE) $(PROCESS_DOCUMENT_REQUIREMENTS) | shasum -a 256 | cut -c1-16)
+PROCESS_DOCUMENT_KEY := lambdas/process-document/$(PROCESS_DOCUMENT_HASH).zip
+PROCESS_DOCUMENT_ZIP := build/process-document.zip
+BACKEND_TEST_DEPS := build/backend-test-deps
 
-.PHONY: backend-test infra-syntax infra-lint infra-validate artifacts-deploy \
-	lambda-package lambda-upload infra-deploy infra-describe infra-delete \
+.PHONY: backend-deps backend-test infra-syntax infra-lint infra-validate artifacts-deploy \
+	create-upload-package process-document-package lambda-package lambda-upload \
+	infra-deploy infra-describe infra-delete \
 	artifacts-delete
 
-backend-test:
-	cd backend && PYTHONPATH=. python3 -m unittest discover -s tests -v
+$(BACKEND_TEST_DEPS)/.installed: $(PROCESS_DOCUMENT_REQUIREMENTS)
+	mkdir -p $(BACKEND_TEST_DEPS)
+	$(PYTHON) -m pip install --disable-pip-version-check --no-compile \
+		--target $(BACKEND_TEST_DEPS) -r $(PROCESS_DOCUMENT_REQUIREMENTS)
+	touch $@
+
+backend-deps: $(BACKEND_TEST_DEPS)/.installed
+
+backend-test: backend-deps
+	cd backend && PYTHONPATH=../$(BACKEND_TEST_DEPS):. $(PYTHON) -m unittest discover -s tests -v
 
 infra-syntax:
 	@ruby -e "require 'yaml'; YAML.parse_file('$(TEMPLATE)'); YAML.parse_file('$(ARTIFACTS_TEMPLATE)'); puts 'YAML syntax is valid.'"
@@ -48,11 +64,21 @@ artifacts-deploy: infra-validate
 		--region $(AWS_REGION) \
 		$(PROFILE_ARG)
 
-lambda-package:
+create-upload-package:
 	rm -rf build/lambda-create-upload-url $(CREATE_UPLOAD_ZIP)
 	mkdir -p build/lambda-create-upload-url
 	cp $(CREATE_UPLOAD_SOURCE) build/lambda-create-upload-url/handler.py
 	cd build/lambda-create-upload-url && zip -q ../create-upload-url.zip handler.py
+
+process-document-package:
+	rm -rf build/lambda-process-document $(PROCESS_DOCUMENT_ZIP)
+	mkdir -p build/lambda-process-document
+	$(PYTHON) -m pip install --disable-pip-version-check --no-compile \
+		--target build/lambda-process-document -r $(PROCESS_DOCUMENT_REQUIREMENTS)
+	cp $(PROCESS_DOCUMENT_SOURCE) build/lambda-process-document/handler.py
+	cd build/lambda-process-document && zip -qr ../process-document.zip .
+
+lambda-package: create-upload-package process-document-package
 
 lambda-upload: artifacts-deploy lambda-package
 	artifact_bucket=$$(aws cloudformation describe-stacks \
@@ -60,6 +86,8 @@ lambda-upload: artifacts-deploy lambda-package
 		--query 'Stacks[0].Outputs[?OutputKey==`ArtifactBucketName`].OutputValue | [0]' \
 		--output text --region $(AWS_REGION) $(PROFILE_ARG)); \
 	aws s3 cp $(CREATE_UPLOAD_ZIP) s3://$$artifact_bucket/$(CREATE_UPLOAD_KEY) \
+		--only-show-errors --region $(AWS_REGION) $(PROFILE_ARG); \
+	aws s3 cp $(PROCESS_DOCUMENT_ZIP) s3://$$artifact_bucket/$(PROCESS_DOCUMENT_KEY) \
 		--only-show-errors --region $(AWS_REGION) $(PROFILE_ARG)
 
 infra-deploy: lambda-upload
@@ -75,6 +103,7 @@ infra-deploy: lambda-upload
 			Environment=$(ENVIRONMENT) \
 			LambdaArtifactBucketName=$$artifact_bucket \
 			CreateUploadUrlArtifactKey=$(CREATE_UPLOAD_KEY) \
+			ProcessDocumentArtifactKey=$(PROCESS_DOCUMENT_KEY) \
 		--capabilities CAPABILITY_IAM \
 		--no-fail-on-empty-changeset \
 		--tags Project=$(PROJECT_NAME) Environment=$(ENVIRONMENT) \

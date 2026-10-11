@@ -3,14 +3,16 @@
 A portfolio project for uploading course PDFs and asking grounded questions about
 their contents using retrieval-augmented generation (RAG) on AWS.
 
-> **Current status:** Phase 3 secure PDF upload infrastructure is implemented.
+> **Current status:** Phase 4 event-driven PDF extraction is implemented and
+> deployed in the `dev` environment.
 > The `dev` deployment status and live verification evidence are recorded in
-> [`docs/deployments/phase-3-dev.md`](docs/deployments/phase-3-dev.md).
+> [`docs/deployments/phase-4-dev.md`](docs/deployments/phase-4-dev.md).
 
 ## Planned capabilities
 
 - Secure, direct-to-S3 PDF uploads using presigned URLs
-- Event-driven PDF extraction and chunking with AWS Lambda
+- Event-driven PDF extraction with AWS Lambda
+- Configurable, page-aware text chunking
 - Embeddings and response generation with Amazon Bedrock
 - Semantic vector search with Amazon OpenSearch Serverless
 - Grounded answers with citations and explicit no-answer behavior
@@ -35,7 +37,7 @@ ai-study-assistant/
 │   └── tests/                # Backend unit tests
 ├── infrastructure/           # Reproducible AWS infrastructure
 │   ├── artifacts.yaml        # Private Lambda deployment-package storage
-│   └── foundation.yaml       # IAM, logs, private documents, upload Lambda
+│   └── foundation.yaml       # S3, IAM, logs, upload and processing Lambdas
 ├── docs/                     # Architecture and engineering decisions
 ├── .env.example              # Configuration names without credentials
 ├── .editorconfig
@@ -64,9 +66,9 @@ flowchart LR
     L --> C
 ```
 
-Only the storage and presigned-upload portion is implemented so far. API
-Gateway, PDF processing, Bedrock, OpenSearch, and the React client remain later
-phases.
+Private storage, presigned PDF upload, and event-driven PDF extraction are
+implemented. Chunking, API Gateway, Bedrock, OpenSearch, and the React client
+remain later phases.
 
 ## Prerequisites for later phases
 
@@ -89,11 +91,14 @@ make infra-lint
 make infra-validate AWS_REGION=us-east-1
 ```
 
-These commands run the upload-handler unit tests, lint both CloudFormation
-templates, and ask AWS to validate them. Install the infrastructure development
-requirements before linting. Use Python 3.12 or newer for development work.
+These commands run 16 unit tests across both Lambda handlers, lint both
+CloudFormation templates, and ask AWS to validate them. Install the
+infrastructure development requirements before linting. Use Python 3.12 or
+newer for development work.
 
-Phase 3 deployment and verification commands are documented in
+Phase 4 design details are documented in
+[`docs/phase-4-pdf-extraction.md`](docs/phase-4-pdf-extraction.md). Deployment
+and verification commands are documented in
 [`infrastructure/README.md`](infrastructure/README.md). AWS deployment has to be
 performed with authenticated CLI credentials for the intended development
 account.

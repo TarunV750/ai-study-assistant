@@ -7,7 +7,9 @@ name = "ai-study-assistant-backend"
 version = "0.1.0"
 description = "Serverless backend for the AWS RAG study assistant"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "pypdf==6.20.0",
+]
 
 [project.optional-dependencies]
 dev = [
