@@ -3,11 +3,10 @@
 A portfolio project for uploading course PDFs and asking grounded questions about
 their contents using retrieval-augmented generation (RAG) on AWS.
 
-> **Current status:** Phase 7 Amazon OpenSearch Serverless vector infrastructure is
-> implemented and
+> **Current status:** Phase 8 chunk and embedding indexing is implemented and
 > deployed in the `dev` environment.
 > The `dev` deployment status and live verification evidence are recorded in
-> [`docs/deployments/phase-7-dev.md`](docs/deployments/phase-7-dev.md).
+> [`docs/deployments/phase-8-dev.md`](docs/deployments/phase-8-dev.md).
 
 ## Planned capabilities
 
@@ -33,6 +32,7 @@ ai-study-assistant/
 │   │   ├── ask_question/
 │   │   ├── create_upload_url/
 │   │   ├── generate_embeddings/
+│   │   ├── index_document/
 │   │   ├── generate_questions/
 │   │   ├── manage_documents/
 │   │   └── process_document/
@@ -62,7 +62,8 @@ flowchart LR
     S -->|PDF created| P[Document processing Lambda]
     P -->|chunks created| E[Embedding Lambda]
     E --> B[Amazon Bedrock embeddings]
-    E --> O[(Amazon OpenSearch Serverless<br/>vector search collection)]
+    E --> I[Vector indexing Lambda]
+    I --> O[(Amazon OpenSearch Serverless<br/>vector search collection)]
     L --> B
     L --> O
     L --> G[Amazon Bedrock generation model]
@@ -71,9 +72,9 @@ flowchart LR
 ```
 
 Private storage, presigned PDF upload, event-driven extraction, page-aware
-chunking, Bedrock embeddings, and the OpenSearch Serverless vector collection
-are implemented. Vector indexing, API Gateway, grounded generation, and the
-React client remain later phases.
+chunking, Bedrock embeddings, the OpenSearch Serverless collection, and
+idempotent vector indexing are implemented. Semantic retrieval, API Gateway,
+grounded generation, and the React client remain later phases.
 
 ## Prerequisites for later phases
 
@@ -96,13 +97,13 @@ make infra-lint
 make infra-validate AWS_REGION=us-east-1
 ```
 
-These commands run 33 unit tests across the Lambda handlers and shared chunking
+These commands run 42 unit tests across the Lambda handlers and shared chunking
 logic, lint both CloudFormation templates, and ask AWS to validate them. Install the
 infrastructure development requirements before linting. Use Python 3.12 or
 newer for development work.
 
-Phase 7 design details are documented in
-[`docs/phase-7-opensearch-serverless.md`](docs/phase-7-opensearch-serverless.md).
+Phase 8 design details are documented in
+[`docs/phase-8-vector-indexing.md`](docs/phase-8-vector-indexing.md).
 Deployment and verification commands are documented in
 [`infrastructure/README.md`](infrastructure/README.md). AWS deployment has to be
 performed with authenticated CLI credentials for the intended development

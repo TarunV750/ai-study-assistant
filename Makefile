@@ -24,10 +24,14 @@ GENERATE_EMBEDDINGS_SOURCE := backend/functions/generate_embeddings/handler.py
 GENERATE_EMBEDDINGS_HASH := $(shell shasum -a 256 $(GENERATE_EMBEDDINGS_SOURCE) | cut -c1-16)
 GENERATE_EMBEDDINGS_KEY := lambdas/generate-embeddings/$(GENERATE_EMBEDDINGS_HASH).zip
 GENERATE_EMBEDDINGS_ZIP := build/generate-embeddings.zip
+INDEX_DOCUMENT_SOURCE := backend/functions/index_document/handler.py
+INDEX_DOCUMENT_HASH := $(shell shasum -a 256 $(INDEX_DOCUMENT_SOURCE) | cut -c1-16)
+INDEX_DOCUMENT_KEY := lambdas/index-document/$(INDEX_DOCUMENT_HASH).zip
+INDEX_DOCUMENT_ZIP := build/index-document.zip
 BACKEND_TEST_DEPS := build/backend-test-deps
 
 .PHONY: backend-deps backend-test infra-syntax infra-lint infra-validate artifacts-deploy \
-	create-upload-package process-document-package generate-embeddings-package \
+	create-upload-package process-document-package generate-embeddings-package index-document-package \
 	lambda-package lambda-upload \
 	infra-deploy infra-describe infra-delete \
 	artifacts-delete
@@ -93,7 +97,13 @@ generate-embeddings-package:
 	cp $(GENERATE_EMBEDDINGS_SOURCE) build/lambda-generate-embeddings/handler.py
 	cd build/lambda-generate-embeddings && zip -q ../generate-embeddings.zip handler.py
 
-lambda-package: create-upload-package process-document-package generate-embeddings-package
+index-document-package:
+	rm -rf build/lambda-index-document $(INDEX_DOCUMENT_ZIP)
+	mkdir -p build/lambda-index-document
+	cp $(INDEX_DOCUMENT_SOURCE) build/lambda-index-document/handler.py
+	cd build/lambda-index-document && zip -q ../index-document.zip handler.py
+
+lambda-package: create-upload-package process-document-package generate-embeddings-package index-document-package
 
 lambda-upload: artifacts-deploy lambda-package
 	artifact_bucket=$$(aws cloudformation describe-stacks \
@@ -105,6 +115,8 @@ lambda-upload: artifacts-deploy lambda-package
 	aws s3 cp $(PROCESS_DOCUMENT_ZIP) s3://$$artifact_bucket/$(PROCESS_DOCUMENT_KEY) \
 		--only-show-errors --region $(AWS_REGION) $(PROFILE_ARG); \
 	aws s3 cp $(GENERATE_EMBEDDINGS_ZIP) s3://$$artifact_bucket/$(GENERATE_EMBEDDINGS_KEY) \
+		--only-show-errors --region $(AWS_REGION) $(PROFILE_ARG); \
+	aws s3 cp $(INDEX_DOCUMENT_ZIP) s3://$$artifact_bucket/$(INDEX_DOCUMENT_KEY) \
 		--only-show-errors --region $(AWS_REGION) $(PROFILE_ARG)
 
 infra-deploy: lambda-upload
@@ -122,6 +134,7 @@ infra-deploy: lambda-upload
 			CreateUploadUrlArtifactKey=$(CREATE_UPLOAD_KEY) \
 			ProcessDocumentArtifactKey=$(PROCESS_DOCUMENT_KEY) \
 			GenerateEmbeddingsArtifactKey=$(GENERATE_EMBEDDINGS_KEY) \
+			IndexDocumentArtifactKey=$(INDEX_DOCUMENT_KEY) \
 		--capabilities CAPABILITY_IAM \
 		--no-fail-on-empty-changeset \
 		--tags Project=$(PROJECT_NAME) Environment=$(ENVIRONMENT) \

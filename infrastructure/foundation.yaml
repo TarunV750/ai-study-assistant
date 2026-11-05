@@ -2,7 +2,8 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
   AWS foundation for the Cloud-Based AI Study Assistant, including dedicated
   execution roles, CloudWatch logs, private document storage, and secure PDF
-  upload instructions, PDF extraction, chunking, Bedrock embeddings, and vector search.
+  upload instructions, PDF extraction, chunking, Bedrock embeddings, vector
+  search, and idempotent chunk indexing.
 
 Parameters:
   ProjectName:
@@ -69,6 +70,10 @@ Parameters:
   GenerateEmbeddingsArtifactKey:
     Type: String
     Description: S3 object key for the packaged generate-embeddings Lambda
+
+  IndexDocumentArtifactKey:
+    Type: String
+    Description: S3 object key for the packaged index-document Lambda
 
   FrontendOrigin:
     Type: String
@@ -162,6 +167,27 @@ Parameters:
     MaxValue: 104857600
     Description: Maximum accepted size of one chunks.json artifact
 
+  MaxIndexArtifactSizeBytes:
+    Type: Number
+    Default: 52428800
+    MinValue: 1
+    MaxValue: 104857600
+    Description: Maximum accepted size of a chunk or embedding index artifact
+
+  MaxIndexChunks:
+    Type: Number
+    Default: 500
+    MinValue: 1
+    MaxValue: 5000
+    Description: Maximum chunks indexed by one Lambda invocation
+
+  IndexBulkBatchSize:
+    Type: Number
+    Default: 50
+    MinValue: 1
+    MaxValue: 500
+    Description: Documents sent in each OpenSearch bulk request
+
   VectorCollectionName:
     Type: String
     Default: ai-study-dev-vectors
@@ -173,6 +199,12 @@ Parameters:
     Default: ai-study-dev-vector-group
     AllowedPattern: "^[a-z][a-z0-9-]{2,31}$"
     Description: Name of the scale-to-zero OpenSearch Serverless collection group
+
+  VectorIndexName:
+    Type: String
+    Default: study-assistant-chunks
+    AllowedPattern: "^(?![_-])[a-z][a-z0-9_-]*$"
+    Description: Name of the OpenSearch vector index containing document chunks
 
 Conditions:
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
@@ -274,6 +306,17 @@ Resources:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub "/aws/lambda/${ProjectName}-${Environment}-generate-embeddings"
+      RetentionInDays: !Ref LogRetentionDays
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  IndexDocumentLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${ProjectName}-${Environment}-index-document"
       RetentionInDays: !Ref LogRetentionDays
       Tags:
         - Key: Project
@@ -612,6 +655,127 @@ Resources:
       Principal: events.amazonaws.com
       SourceArn: !GetAtt ChunkArtifactEventRule.Arn
 
+  IndexDocumentRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Execution role for indexing validated document vectors
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: WriteOwnCloudWatchLogs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "${IndexDocumentLogGroup.Arn}:*"
+        - PolicyName: ReadIndexArtifacts
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource:
+                  - !Sub "${DocumentsBucket.Arn}/processing/*/chunks.json"
+                  - !Sub "${DocumentsBucket.Arn}/processing/*/embeddings.json"
+                  - !Sub "${DocumentsBucket.Arn}/processing/*/status.json"
+        - PolicyName: WriteIndexStatus
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub "${DocumentsBucket.Arn}/processing/*/status.json"
+        - PolicyName: AccessVectorCollectionApi
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: aoss:APIAccessAll
+                Resource: !GetAtt VectorCollection.Arn
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  IndexDocumentFunction:
+    Type: AWS::Lambda::Function
+    DependsOn:
+      - IndexDocumentLogGroup
+      - DocumentsBucketPolicy
+      - VectorDataAccessPolicy
+    Properties:
+      FunctionName: !Sub "${ProjectName}-${Environment}-index-document"
+      Description: Validates chunks and vectors before bulk indexing them in OpenSearch
+      Architectures:
+        - arm64
+      Code:
+        S3Bucket: !Ref LambdaArtifactBucketName
+        S3Key: !Ref IndexDocumentArtifactKey
+      Environment:
+        Variables:
+          DOCUMENTS_BUCKET_NAME: !Ref DocumentsBucket
+          OPENSEARCH_COLLECTION_ENDPOINT: !GetAtt VectorCollection.CollectionEndpoint
+          OPENSEARCH_INDEX_NAME: !Ref VectorIndexName
+          EMBEDDING_DIMENSIONS: !Ref EmbeddingDimensions
+          MAX_INDEX_CHUNKS: !Ref MaxIndexChunks
+          MAX_INDEX_ARTIFACT_SIZE_BYTES: !Ref MaxIndexArtifactSizeBytes
+          INDEX_BULK_BATCH_SIZE: !Ref IndexBulkBatchSize
+      Handler: handler.lambda_handler
+      MemorySize: 512
+      Role: !GetAtt IndexDocumentRole.Arn
+      Runtime: python3.12
+      Timeout: 120
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  EmbeddingArtifactEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Routes completed embedding artifacts to OpenSearch indexing
+      EventPattern:
+        source:
+          - aws.s3
+        detail-type:
+          - Object Created
+        detail:
+          bucket:
+            name:
+              - !Ref DocumentsBucket
+          object:
+            key:
+              - suffix: /embeddings.json
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt IndexDocumentFunction.Arn
+          Id: IndexDocumentVectors
+          RetryPolicy:
+            MaximumEventAgeInSeconds: 3600
+            MaximumRetryAttempts: 2
+
+  AllowEventBridgeToIndexDocuments:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref IndexDocumentFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt EmbeddingArtifactEventRule.Arn
+
   VectorCollectionGroup:
     Type: AWS::OpenSearchServerless::CollectionGroup
     Metadata:
@@ -659,9 +823,9 @@ Resources:
     Properties:
       Name: !Sub "study-${Environment}-vec-data"
       Type: data
-      Description: Grants the embedding role collection and index data-plane access
+      Description: Grants the indexing role write access to the vector index
       Policy: !Sub >-
-        [{"Description":"Embedding pipeline vector access","Rules":[{"ResourceType":"collection","Resource":["collection/${VectorCollectionName}"],"Permission":["aoss:DescribeCollectionItems"]},{"ResourceType":"index","Resource":["index/${VectorCollectionName}/*"],"Permission":["aoss:CreateIndex","aoss:UpdateIndex","aoss:DescribeIndex","aoss:ReadDocument","aoss:WriteDocument"]}],"Principal":["${GenerateEmbeddingsRole.Arn}"]}]
+        [{"Description":"Document vector write access","Rules":[{"ResourceType":"index","Resource":["index/${VectorCollectionName}/${VectorIndexName}"],"Permission":["aoss:CreateIndex","aoss:DescribeIndex","aoss:WriteDocument"]}],"Principal":["${IndexDocumentRole.Arn}"]}]
 
   VectorCollection:
     Type: AWS::OpenSearchServerless::Collection
@@ -815,6 +979,14 @@ Outputs:
     Description: ARN of the document embedding Lambda
     Value: !GetAtt GenerateEmbeddingsFunction.Arn
 
+  IndexDocumentFunctionName:
+    Description: Lambda that indexes validated chunks and vectors
+    Value: !Ref IndexDocumentFunction
+
+  IndexDocumentFunctionArn:
+    Description: ARN of the document indexing Lambda
+    Value: !GetAtt IndexDocumentFunction.Arn
+
   VectorCollectionName:
     Description: OpenSearch Serverless vector collection name
     Value: !Ref VectorCollectionName
@@ -835,6 +1007,10 @@ Outputs:
     Description: Scale-to-zero collection group name
     Value: !Ref VectorCollectionGroupName
 
+  VectorIndexName:
+    Description: OpenSearch index containing document chunks and vectors
+    Value: !Ref VectorIndexName
+
   AskQuestionRoleArn:
     Description: Execution role ARN for the question-answering Lambda
     Value: !GetAtt AskQuestionRole.Arn
@@ -848,11 +1024,13 @@ Outputs:
     Value: !GetAtt ManageDocumentsRole.Arn
 
   LogGroupNames:
-    Description: CloudWatch log groups created for the five future Lambdas
+    Description: CloudWatch log groups created for application Lambdas
     Value: !Join
       - ","
       - - !Ref CreateUploadUrlLogGroup
         - !Ref ProcessDocumentLogGroup
+        - !Ref GenerateEmbeddingsLogGroup
+        - !Ref IndexDocumentLogGroup
         - !Ref AskQuestionLogGroup
         - !Ref GenerateQuestionsLogGroup
         - !Ref ManageDocumentsLogGroup

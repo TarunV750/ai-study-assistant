@@ -19,9 +19,11 @@ and a status record back to a separate S3 prefix. Creating `chunks.json`
 triggers a separate embedding Lambda, which invokes Amazon Bedrock and writes
 validated vectors to `embeddings.json`. This path is implemented.
 
-The Amazon OpenSearch Serverless vector collection and its security policies are
-also provisioned. Later phases will create its vector index and write chunks,
-vectors, and metadata.
+Creating `embeddings.json` triggers a dedicated indexing Lambda. It validates
+the matching chunks and vectors, creates the vector index when needed, and uses
+deterministic IDs to bulk-write searchable documents and metadata. The Amazon
+OpenSearch Serverless collection, security policies, index creation, and write
+path are implemented.
 
 For questions, an API Lambda embeds the query, runs semantic vector search in
 OpenSearch Serverless, builds a prompt from relevant chunks, and invokes a
@@ -72,5 +74,15 @@ OCUs. It uses the next-generation group's required high-availability behavior,
 an AWS-owned encryption key, the standard vector-index path, and an
 authenticated public API endpoint. Public network
 reachability does not grant data access: the data policy names only the
-embedding role, which does not receive the required IAM data-plane permission
-until the indexing phase.
+indexing role. That role receives the required collection-scoped IAM data-plane
+permission, while the data policy narrows it to create, describe, and write one
+exact index.
+
+## Implemented indexing boundary
+
+The indexing Lambda accepts only `processing/<uuid>/embeddings.json` events and
+waits for the matching `EMBEDDED` status. It joins each embedding to a validated
+source chunk, ensures the 1,024-dimension cosine index exists, and writes
+bounded bulk batches. Deterministic chunk IDs make retries idempotent. Permanent
+input failures become `FAILED` indexing statuses; transient service errors are
+raised for EventBridge retry.

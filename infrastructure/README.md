@@ -6,7 +6,8 @@ The deployed development environment uses two stacks:
 - `artifacts.yaml` creates a private bucket for versioned Lambda ZIP files.
 - `foundation.yaml` creates the application roles, log groups, private document
   bucket, upload Lambda, PDF extraction/chunking Lambda, and Bedrock embedding
-  Lambda, plus the OpenSearch Serverless vector collection and policies.
+  Lambda, vector-indexing Lambda, plus the OpenSearch Serverless vector
+  collection and policies.
 
 ## Secure upload flow
 
@@ -52,10 +53,17 @@ vectors. The dedicated role can read only chunk and completion-status artifacts,
 write only embedding and status artifacts, and invoke only that configured
 foundation model.
 
-## Vector-search foundation
+## Vector indexing flow
 
-Phase 7 provisions a `VECTORSEARCH` collection, but intentionally does not
-create an index or write documents yet. Those are Phase 8 responsibilities.
+Phase 7 provisions the `VECTORSEARCH` collection. Phase 8 adds the write path:
+
+1. S3 publishes creation of `processing/<document-id>/embeddings.json`.
+2. EventBridge invokes `index-document`.
+3. The Lambda waits for the final `EMBEDDED` status and validates both source
+   artifacts.
+4. It creates the 1,024-dimension cosine index if needed and bulk-writes joined
+   chunks and vectors under deterministic document IDs.
+5. A successful write produces final `INDEXED` status.
 
 The collection uses:
 
@@ -66,11 +74,12 @@ The collection uses:
 - encryption with an AWS-owned key;
 - a publicly reachable API endpoint that still requires signed, authorized
   requests; and
-- a data-access policy naming only the embedding role.
+- a data-access policy naming only the indexing role.
 
-The embedding role does not yet have `aoss:APIAccessAll`, so the Phase 7 policy
-does not grant it effective data-plane access on its own. Phase 8 will add only
-the IAM permission needed to create the index and write vectors.
+The indexing role has collection-scoped `aoss:APIAccessAll`, which Serverless
+requires for signed data-plane requests. The separate data policy limits it to
+creating, describing, and writing one exact index. It cannot read search
+results or administer the collection.
 
 ## Validate and test
 
@@ -103,7 +112,7 @@ make infra-deploy AWS_PROFILE=YOUR_PROFILE AWS_REGION=us-east-1
 The Make target:
 
 1. deploys the private artifact bucket;
-2. packages the upload, processing, and embedding Lambdas, including the pinned
+2. packages the upload, processing, embedding, and indexing Lambdas, including the pinned
    `pypdf` runtime dependency;
 3. uploads them under source-content hashes; and
 4. updates the foundation stack with all three artifact locations.
@@ -138,9 +147,9 @@ aws s3 cp s3://DOCUMENTS_BUCKET/processing/DOCUMENT_ID/embeddings.json - \
   --profile YOUR_PROFILE --region us-east-1
 ```
 
-An `EMBEDDED` status includes the model, dimensions, and chunk count. A `FAILED`
+An `INDEXED` status includes the index name and chunk count. A `FAILED`
 status contains a stable error code, safe message, and failed stage. Chunk and
-embedding settings are CloudFormation parameters.
+embedding/indexing settings are CloudFormation parameters.
 
 ## Costs and cleanup
 
