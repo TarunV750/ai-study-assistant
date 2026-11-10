@@ -35,6 +35,11 @@ OPENSEARCH_SOURCE := backend/shared/opensearch.py
 ASK_QUESTION_HASH := $(shell shasum -a 256 $(ASK_QUESTION_SOURCE) $(RAG_SOURCE) $(RETRIEVAL_SOURCE) $(OPENSEARCH_SOURCE) | shasum -a 256 | cut -c1-16)
 ASK_QUESTION_KEY := lambdas/ask-question/$(ASK_QUESTION_HASH).zip
 ASK_QUESTION_ZIP := build/ask-question.zip
+GENERATE_QUESTIONS_SOURCE := backend/functions/generate_questions/handler.py
+STUDY_SOURCE := backend/shared/study.py
+GENERATE_QUESTIONS_HASH := $(shell shasum -a 256 $(GENERATE_QUESTIONS_SOURCE) $(STUDY_SOURCE) $(RAG_SOURCE) $(RETRIEVAL_SOURCE) $(OPENSEARCH_SOURCE) | shasum -a 256 | cut -c1-16)
+GENERATE_QUESTIONS_KEY := lambdas/generate-questions/$(GENERATE_QUESTIONS_HASH).zip
+GENERATE_QUESTIONS_ZIP := build/generate-questions.zip
 MANAGE_DOCUMENTS_SOURCE := backend/functions/manage_documents/handler.py
 MANAGE_DOCUMENTS_HASH := $(shell shasum -a 256 $(MANAGE_DOCUMENTS_SOURCE) | cut -c1-16)
 MANAGE_DOCUMENTS_KEY := lambdas/manage-documents/$(MANAGE_DOCUMENTS_HASH).zip
@@ -43,7 +48,7 @@ BACKEND_TEST_DEPS := build/backend-test-deps
 
 .PHONY: backend-deps backend-test infra-syntax infra-lint infra-validate artifacts-deploy \
 	create-upload-package process-document-package generate-embeddings-package index-document-package \
-	ask-question-package manage-documents-package \
+	ask-question-package generate-questions-package manage-documents-package \
 	lambda-package lambda-upload \
 	infra-deploy infra-describe infra-delete \
 	artifacts-delete
@@ -123,6 +128,14 @@ ask-question-package:
 	touch build/lambda-ask-question/shared/__init__.py
 	cd build/lambda-ask-question && zip -qr ../ask-question.zip .
 
+generate-questions-package:
+	rm -rf build/lambda-generate-questions $(GENERATE_QUESTIONS_ZIP)
+	mkdir -p build/lambda-generate-questions/shared
+	cp $(GENERATE_QUESTIONS_SOURCE) build/lambda-generate-questions/handler.py
+	cp $(STUDY_SOURCE) $(RAG_SOURCE) $(RETRIEVAL_SOURCE) $(OPENSEARCH_SOURCE) build/lambda-generate-questions/shared/
+	touch build/lambda-generate-questions/shared/__init__.py
+	cd build/lambda-generate-questions && zip -qr ../generate-questions.zip .
+
 manage-documents-package:
 	rm -rf build/lambda-manage-documents $(MANAGE_DOCUMENTS_ZIP)
 	mkdir -p build/lambda-manage-documents
@@ -130,7 +143,7 @@ manage-documents-package:
 	cd build/lambda-manage-documents && zip -q ../manage-documents.zip handler.py
 
 lambda-package: create-upload-package process-document-package generate-embeddings-package \
-	index-document-package ask-question-package manage-documents-package
+	index-document-package ask-question-package generate-questions-package manage-documents-package
 
 lambda-upload: artifacts-deploy lambda-package
 	artifact_bucket=$$(aws cloudformation describe-stacks \
@@ -146,6 +159,8 @@ lambda-upload: artifacts-deploy lambda-package
 	aws s3 cp $(INDEX_DOCUMENT_ZIP) s3://$$artifact_bucket/$(INDEX_DOCUMENT_KEY) \
 		--only-show-errors --region $(AWS_REGION) $(PROFILE_ARG); \
 	aws s3 cp $(ASK_QUESTION_ZIP) s3://$$artifact_bucket/$(ASK_QUESTION_KEY) \
+		--only-show-errors --region $(AWS_REGION) $(PROFILE_ARG); \
+	aws s3 cp $(GENERATE_QUESTIONS_ZIP) s3://$$artifact_bucket/$(GENERATE_QUESTIONS_KEY) \
 		--only-show-errors --region $(AWS_REGION) $(PROFILE_ARG); \
 	aws s3 cp $(MANAGE_DOCUMENTS_ZIP) s3://$$artifact_bucket/$(MANAGE_DOCUMENTS_KEY) \
 		--only-show-errors --region $(AWS_REGION) $(PROFILE_ARG)
@@ -167,6 +182,7 @@ infra-deploy: lambda-upload
 			GenerateEmbeddingsArtifactKey=$(GENERATE_EMBEDDINGS_KEY) \
 			IndexDocumentArtifactKey=$(INDEX_DOCUMENT_KEY) \
 			AskQuestionArtifactKey=$(ASK_QUESTION_KEY) \
+			GenerateQuestionsArtifactKey=$(GENERATE_QUESTIONS_KEY) \
 			ManageDocumentsArtifactKey=$(MANAGE_DOCUMENTS_KEY) \
 		--capabilities CAPABILITY_IAM \
 		--no-fail-on-empty-changeset \

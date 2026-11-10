@@ -79,6 +79,10 @@ Parameters:
     Type: String
     Description: S3 object key for the packaged ask-question Lambda
 
+  GenerateQuestionsArtifactKey:
+    Type: String
+    Description: S3 object key for the packaged generate-questions Lambda
+
   ManageDocumentsArtifactKey:
     Type: String
     Description: S3 object key for the packaged manage-documents Lambda
@@ -878,7 +882,7 @@ Resources:
       Type: data
       Description: Grants the indexing role write access to the vector index
       Policy: !Sub >-
-        [{"Description":"Document vector write access","Rules":[{"ResourceType":"index","Resource":["index/${VectorCollectionName}/${VectorIndexName}"],"Permission":["aoss:CreateIndex","aoss:DescribeIndex","aoss:WriteDocument"]}],"Principal":["${IndexDocumentRole.Arn}"]},{"Description":"RAG vector read access","Rules":[{"ResourceType":"index","Resource":["index/${VectorCollectionName}/${VectorIndexName}"],"Permission":["aoss:DescribeIndex","aoss:ReadDocument"]}],"Principal":["${AskQuestionRole.Arn}"]}]
+        [{"Description":"Document vector write access","Rules":[{"ResourceType":"index","Resource":["index/${VectorCollectionName}/${VectorIndexName}"],"Permission":["aoss:CreateIndex","aoss:DescribeIndex","aoss:WriteDocument"]}],"Principal":["${IndexDocumentRole.Arn}"]},{"Description":"RAG vector read access","Rules":[{"ResourceType":"index","Resource":["index/${VectorCollectionName}/${VectorIndexName}"],"Permission":["aoss:DescribeIndex","aoss:ReadDocument"]}],"Principal":["${AskQuestionRole.Arn}","${GenerateQuestionsRole.Arn}"]}]
 
   VectorCollection:
     Type: AWS::OpenSearchServerless::Collection
@@ -1011,6 +1015,59 @@ Resources:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Resource: !Sub "${GenerateQuestionsLogGroup.Arn}:*"
+        - PolicyName: InvokeStudyModels
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: bedrock:InvokeModel
+                Resource:
+                  - !Sub >-
+                    arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${EmbeddingModelId}
+                  - !Sub >-
+                    arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${GenerationModelId}
+        - PolicyName: ReadVectorIndex
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: aoss:APIAccessAll
+                Resource: !GetAtt VectorCollection.Arn
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  GenerateQuestionsFunction:
+    Type: AWS::Lambda::Function
+    DependsOn:
+      - GenerateQuestionsLogGroup
+      - VectorDataAccessPolicy
+    Properties:
+      FunctionName: !Sub "${ProjectName}-${Environment}-generate-questions"
+      Description: Generates grounded summaries, questions, concepts, and study guides
+      Architectures:
+        - arm64
+      Code:
+        S3Bucket: !Ref LambdaArtifactBucketName
+        S3Key: !Ref GenerateQuestionsArtifactKey
+      Environment:
+        Variables:
+          EMBEDDING_MODEL_ID: !Ref EmbeddingModelId
+          EMBEDDING_DIMENSIONS: !Ref EmbeddingDimensions
+          GENERATION_MODEL_ID: !Ref GenerationModelId
+          OPENSEARCH_COLLECTION_ENDPOINT: !GetAtt VectorCollection.CollectionEndpoint
+          OPENSEARCH_INDEX_NAME: !Ref VectorIndexName
+          RETRIEVAL_TOP_K: !Ref RetrievalTopK
+          RETRIEVAL_MIN_SCORE: !Ref RetrievalMinScore
+          MAX_RAG_CONTEXT_CHARACTERS: !Ref MaxRagContextCharacters
+          MAX_STUDY_TOKENS: 1400
+      Handler: handler.lambda_handler
+      MemorySize: 512
+      Role: !GetAtt GenerateQuestionsRole.Arn
+      Runtime: python3.12
+      Timeout: 29
       Tags:
         - Key: Project
           Value: !Ref ProjectName
@@ -1137,6 +1194,15 @@ Resources:
       PayloadFormatVersion: "2.0"
       TimeoutInMillis: 15000
 
+  GenerateQuestionsIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref StudyApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt GenerateQuestionsFunction.Arn
+      PayloadFormatVersion: "2.0"
+      TimeoutInMillis: 30000
+
   CreateUploadUrlRoute:
     Type: AWS::ApiGatewayV2::Route
     Properties:
@@ -1150,6 +1216,13 @@ Resources:
       ApiId: !Ref StudyApi
       RouteKey: POST /ask
       Target: !Sub "integrations/${AskQuestionIntegration}"
+
+  GenerateQuestionsRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref StudyApi
+      RouteKey: POST /study
+      Target: !Sub "integrations/${GenerateQuestionsIntegration}"
 
   ListDocumentsRoute:
     Type: AWS::ApiGatewayV2::Route
@@ -1210,6 +1283,15 @@ Resources:
       SourceArn: !Sub >-
         arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${StudyApi}/*/GET/documents*
 
+  AllowApiToGenerateQuestions:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref GenerateQuestionsFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub >-
+        arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${StudyApi}/*/POST/study
+
 Outputs:
   DocumentsBucketName:
     Description: Private bucket containing uploaded course PDFs
@@ -1258,6 +1340,10 @@ Outputs:
   AskQuestionFunctionName:
     Description: Lambda that performs grounded question answering
     Value: !Ref AskQuestionFunction
+
+  GenerateQuestionsFunctionName:
+    Description: Lambda that creates grounded study material
+    Value: !Ref GenerateQuestionsFunction
 
   ManageDocumentsFunctionName:
     Description: Lambda that lists documents and processing status
