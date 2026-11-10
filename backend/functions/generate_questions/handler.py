@@ -7,6 +7,7 @@ import logging
 import os
 from typing import Any
 
+from shared.rag import cited_source_numbers
 from shared.retrieval import RetrievalValidationError, retrieve_chunks, validate_document_ids
 from shared.study import generate_study_material, retrieval_query, validate_study_request
 
@@ -69,8 +70,13 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             max_output_tokens=int(os.environ.get("MAX_STUDY_TOKENS", "1400")),
         )
         sources = [{"sourceNumber": i, "documentId": chunk["documentId"], "filename": chunk.get("filename", "document.pdf"), "chunkId": chunk["chunkId"], "pageNumber": chunk["pageNumber"], "score": chunk["score"]} for i, chunk in enumerate(chunks, 1)]
+        cited_numbers = cited_source_numbers(generated["content"], len(sources))
+        if not cited_numbers:
+            LOGGER.warning(json.dumps({"event": "study_output_missing_citations", "request_id": request_id, "mode": request["mode"]}, separators=(",", ":")))
+            return _response(502, {"error": {"code": "UNGROUNDED_MODEL_RESPONSE", "message": "The study material could not be tied to a source. Please try again."}})
+        cited_sources = [source for source in sources if source["sourceNumber"] in cited_numbers]
         LOGGER.info(json.dumps({"event": "study_material_generated", "request_id": request_id, "mode": request["mode"], "source_count": len(sources)}, separators=(",", ":")))
-        return _response(200, {"title": generated["title"], "content": generated["content"], "noAnswer": False, "sources": sources})
+        return _response(200, {"title": generated["title"], "content": generated["content"], "noAnswer": False, "sources": cited_sources})
     except RetrievalValidationError as error:
         return _response(400, {"error": {"code": "VALIDATION_ERROR", "field": error.field, "message": error.message}})
     except (KeyError, TypeError, ValueError):

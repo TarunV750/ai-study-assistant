@@ -28,6 +28,14 @@ class GenerateQuestionsHandlerTests(unittest.TestCase):
         response = handler.lambda_handler({"requestContext": {"http": {"method": "POST"}}, "headers": {"content-type": "text/plain"}, "body": "{}"}, None)
         self.assertEqual(response["statusCode"], 400)
 
+    @patch.object(handler, "_client", return_value=object())
+    @patch.object(handler, "generate_study_material", return_value={"title": "Course summary", "content": "Uncited material", "usage": {}})
+    @patch.object(handler, "retrieve_chunks", return_value=[{"documentId": "9b8c7d6e-5f4a-43b2-8c7d-6e5f4a3b2c1d", "chunkId": "c1", "pageNumber": 1, "text": "text", "score": .9}])
+    def test_rejects_uncited_study_output(self, retrieve, generate, client):
+        response = handler.lambda_handler({"body": json.dumps({"mode": "summary"})}, None)
+        self.assertEqual(response["statusCode"], 502)
+        self.assertEqual(json.loads(response["body"])["error"]["code"], "UNGROUNDED_MODEL_RESPONSE")
+
 
 if __name__ == "__main__":
     unittest.main()
