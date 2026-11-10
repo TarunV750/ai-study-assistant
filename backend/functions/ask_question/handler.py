@@ -7,7 +7,7 @@ import logging
 import os
 from typing import Any
 
-from shared.rag import NO_ANSWER_MESSAGE, generate_grounded_answer
+from shared.rag import NO_ANSWER_MESSAGE, cited_source_numbers, generate_grounded_answer
 from shared.retrieval import (
     DEFAULT_MIN_SCORE,
     DEFAULT_TOP_K,
@@ -105,12 +105,19 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             {
                 "sourceNumber": index,
                 "documentId": chunk["documentId"],
+                "filename": chunk.get("filename", "document.pdf"),
                 "chunkId": chunk["chunkId"],
                 "pageNumber": chunk["pageNumber"],
                 "score": chunk["score"],
             }
             for index, chunk in enumerate(chunks, start=1)
         ]
+        cited_numbers = cited_source_numbers(generated["answer"], len(sources))
+        is_no_answer = generated["answer"].strip() == NO_ANSWER_MESSAGE
+        if not is_no_answer and not cited_numbers:
+            _log("rag_answer_missing_citations", request_id=request_id)
+            return _response(502, {"error": {"code": "UNGROUNDED_MODEL_RESPONSE", "message": "The AI response could not be tied to a source. Please try again."}})
+        cited_sources = [source for source in sources if source["sourceNumber"] in cited_numbers]
         _log(
             "rag_answer_generated",
             request_id=request_id,
@@ -122,8 +129,8 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             200,
             {
                 "answer": generated["answer"],
-                "noAnswer": False,
-                "sources": sources,
+                "noAnswer": is_no_answer,
+                "sources": [] if is_no_answer else cited_sources,
             },
         )
     except RetrievalValidationError as error:

@@ -61,7 +61,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             max_context_characters=int(os.environ.get("MAX_RAG_CONTEXT_CHARACTERS", "12000")),
             max_output_tokens=int(os.environ.get("MAX_STUDY_TOKENS", "1400")),
         )
-        sources = [{"sourceNumber": i, "documentId": chunk["documentId"], "chunkId": chunk["chunkId"], "pageNumber": chunk["pageNumber"], "score": chunk["score"]} for i, chunk in enumerate(chunks, 1)]
+        sources = [{"sourceNumber": i, "documentId": chunk["documentId"], "filename": chunk.get("filename", "document.pdf"), "chunkId": chunk["chunkId"], "pageNumber": chunk["pageNumber"], "score": chunk["score"]} for i, chunk in enumerate(chunks, 1)]
         LOGGER.info(json.dumps({"event": "study_material_generated", "request_id": request_id, "mode": request["mode"], "source_count": len(sources)}, separators=(",", ":")))
         return _response(200, {"title": generated["title"], "content": generated["content"], "noAnswer": False, "sources": sources})
     except RetrievalValidationError as error:

@@ -170,6 +170,8 @@ def _validated_documents(
 ) -> list[dict[str, Any]]:
     chunks = chunks_artifact.get("chunks")
     embeddings = embeddings_artifact.get("embeddings")
+    source = chunks_artifact.get("source", {})
+    filename = source.get("originalFilename", "document.pdf") if isinstance(source, dict) else "document.pdf"
     if (
         chunks_artifact.get("schemaVersion") != 1
         or chunks_artifact.get("documentId") != document_id
@@ -184,6 +186,9 @@ def _validated_documents(
         or len(chunks) != len(embeddings)
         or chunks_artifact.get("chunkCount") != len(chunks)
         or embeddings_artifact.get("chunkCount") != len(embeddings)
+        or not isinstance(filename, str)
+        or not filename.strip()
+        or len(filename) > 255
     ):
         raise IndexInputRejected(
             "INVALID_INDEX_ARTIFACTS", "The chunk and embedding artifact contracts do not match."
@@ -242,6 +247,7 @@ def _validated_documents(
         documents.append(
             {
                 "document_id": document_id,
+                "filename": filename.strip(),
                 "chunk_id": expected_id,
                 "chunk_index": index,
                 "page_number": page_number,
@@ -330,6 +336,7 @@ def _ensure_index(
         "mappings": {
             "properties": {
                 "document_id": {"type": "keyword"},
+                "filename": {"type": "keyword", "ignore_above": 255},
                 "chunk_id": {"type": "keyword"},
                 "chunk_index": {"type": "integer"},
                 "page_number": {"type": "integer"},

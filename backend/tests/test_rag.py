@@ -35,6 +35,10 @@ class FakeBedrock:
 
 
 class RagTests(unittest.TestCase):
+    def test_extracts_only_unique_valid_citations(self):
+        answer = "Use [Source 2], [Source 1], [Source 2], and ignore [Source 9]."
+        self.assertEqual(rag.cited_source_numbers(answer, 2), [2, 1])
+
     def test_prompt_separates_sources_and_question(self):
         prompt = rag.build_grounded_prompt("What is inheritance?", chunks())
 

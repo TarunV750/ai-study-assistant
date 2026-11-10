@@ -105,6 +105,7 @@ def _search_body(
         "_source": {
             "includes": [
                 "document_id",
+                "filename",
                 "chunk_id",
                 "chunk_index",
                 "page_number",
@@ -190,6 +191,7 @@ def search_chunks(
         results.append(
             {
                 "documentId": required[0],
+                "filename": source.get("filename", "document.pdf") if isinstance(source.get("filename", "document.pdf"), str) else "document.pdf",
                 "chunkId": required[1],
                 "chunkIndex": required[2],
                 "pageNumber": required[3],

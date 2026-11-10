@@ -34,6 +34,7 @@ def chunks_artifact(count=2):
         "schemaVersion": 1,
         "documentId": DOCUMENT_ID,
         "status": "CHUNKED",
+        "source": {"originalFilename": "Lecture 1.pdf", "key": f"uploads/{DOCUMENT_ID}/document.pdf"},
         "chunkCount": count,
         "chunks": chunks,
     }
@@ -171,6 +172,7 @@ class IndexDocumentTests(unittest.TestCase):
         self.assertEqual(action["index"]["_index"], "study-assistant-chunks")
         self.assertEqual(action["index"]["_id"], f"{DOCUMENT_ID}#chunk-00001")
         self.assertEqual(document["text"], "Chunk text number 1")
+        self.assertEqual(document["filename"], "Lecture 1.pdf")
         self.assertEqual(document["chunk_vector"], [0.1, 0.2, 0.3])
         self.assertEqual(self.stored_status()["indexName"], "study-assistant-chunks")
 

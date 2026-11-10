@@ -262,6 +262,10 @@ def _process_document(
             "documentId": document_id,
             "status": "CHUNKED",
             "sourceExtractedKey": extracted_key,
+            "source": {
+                "originalFilename": extracted["source"]["originalFilename"],
+                "key": key,
+            },
             "strategy": {
                 "unit": "characters",
                 "maxCharacters": chunking_config.max_characters,

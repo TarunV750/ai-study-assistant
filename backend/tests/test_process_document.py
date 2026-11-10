@@ -145,6 +145,7 @@ class ProcessDocumentTests(unittest.TestCase):
 
         chunked = self.stored_json(chunks_key)
         self.assertEqual(chunked["status"], "CHUNKED")
+        self.assertEqual(chunked["source"]["originalFilename"], "Lecture 1.pdf")
         self.assertEqual(chunked["strategy"]["pageBoundaryBehavior"], "preserve")
         self.assertEqual(
             [chunk["pageNumber"] for chunk in chunked["chunks"]],
