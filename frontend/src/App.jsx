@@ -61,6 +61,10 @@ export default function App() {
   }
 
   async function generateStudyMaterial() {
+    if (selected.length === 0) {
+      setNotice("Select at least one Ready document before generating study material.");
+      return;
+    }
     setBusy("study"); setNotice("");
     try { setStudyOutput(await createStudyMaterial({ mode: studyMode, documentIds: selected, count: 8, questionType: "mixed" })); }
     catch (error) { setNotice(error.message); }
@@ -82,7 +86,7 @@ export default function App() {
           <form className="ask-form" onSubmit={submitQuestion}><textarea value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Ask about a concept, definition, or example…" maxLength={2000} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form.requestSubmit(); } }} /><button disabled={Boolean(busy) || !question.trim()}>Ask →</button></form>
         </section>
       </section>
-      <section className="study-section"><div className="section-title"><div><p className="eyebrow">Study tools</p><h2>Build your next study session</h2></div><p>Generated only from the sources you choose.</p></div><div className="study-controls"><div>{STUDY_MODES.map(([value, label]) => <button key={value} className={studyMode === value ? "active" : ""} onClick={() => setStudyMode(value)}>{label}</button>)}</div><button className="generate" onClick={generateStudyMaterial} disabled={Boolean(busy) || readyDocuments.length === 0}>{busy === "study" ? "Generating…" : "Generate"}</button></div>{studyOutput && <article className="study-output"><p className="eyebrow">{studyOutput.title}</p><div>{studyOutput.content}</div>{studyOutput.sources?.length > 0 && <p className="source-line">Based on {studyOutput.sources.length} retrieved source passages.</p>}</article>}</section>
+      <section className="study-section"><div className="section-title"><div><p className="eyebrow">Study tools</p><h2>Build your next study session</h2></div><p>Generated only from the sources you choose.</p></div><div className="study-controls"><div>{STUDY_MODES.map(([value, label]) => <button key={value} className={studyMode === value ? "active" : ""} onClick={() => setStudyMode(value)}>{label}</button>)}</div><button className="generate" onClick={generateStudyMaterial} disabled={Boolean(busy) || selected.length === 0}>{busy === "study" ? "Generating…" : "Generate"}</button></div>{selected.length === 0 && readyDocuments.length > 0 && <p className="selection-note">Select one or more Ready documents in your library to enable study tools.</p>}{studyOutput && <article className="study-output"><p className="eyebrow">{studyOutput.title}</p><div>{studyOutput.content}</div>{studyOutput.sources?.length > 0 && <p className="source-line">Based on {studyOutput.sources.length} retrieved source passages.</p>}</article>}</section>
     </main><footer><span>CourseLens AI</span><p>Built on AWS · Answers remain grounded in your uploaded material.</p></footer>
   </div>;
 }

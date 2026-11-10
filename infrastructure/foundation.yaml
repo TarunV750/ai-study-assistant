@@ -238,6 +238,20 @@ Parameters:
     MaxValue: 1
     Description: Initial minimum OpenSearch relevance score
 
+  StudyRetrievalTopK:
+    Type: Number
+    Default: 10
+    MinValue: 1
+    MaxValue: 10
+    Description: Maximum passages used for broad study-material generation
+
+  StudyRetrievalMinScore:
+    Type: Number
+    Default: 0
+    MinValue: 0
+    MaxValue: 1
+    Description: Relevance floor for explicitly selected study documents
+
   MaxRagContextCharacters:
     Type: Number
     Default: 12000
@@ -1059,8 +1073,8 @@ Resources:
           GENERATION_MODEL_ID: !Ref GenerationModelId
           OPENSEARCH_COLLECTION_ENDPOINT: !GetAtt VectorCollection.CollectionEndpoint
           OPENSEARCH_INDEX_NAME: !Ref VectorIndexName
-          RETRIEVAL_TOP_K: !Ref RetrievalTopK
-          RETRIEVAL_MIN_SCORE: !Ref RetrievalMinScore
+          STUDY_RETRIEVAL_TOP_K: !Ref StudyRetrievalTopK
+          STUDY_RETRIEVAL_MIN_SCORE: !Ref StudyRetrievalMinScore
           MAX_RAG_CONTEXT_CHARACTERS: !Ref MaxRagContextCharacters
           MAX_STUDY_TOKENS: 1400
       Handler: handler.lambda_handler

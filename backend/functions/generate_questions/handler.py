@@ -55,11 +55,16 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         raw = _payload(event)
         request = validate_study_request(raw)
         document_ids = validate_document_ids(raw.get("documentIds"))
+        if not document_ids:
+            raise RetrievalValidationError(
+                "documentIds", "Select at least one indexed document for study tools."
+            )
         chunks = retrieve_chunks(
             _client(), question=retrieval_query(request), model_id=os.environ["EMBEDDING_MODEL_ID"],
             dimensions=int(os.environ["EMBEDDING_DIMENSIONS"]), endpoint=os.environ["OPENSEARCH_COLLECTION_ENDPOINT"],
             region=os.environ.get("AWS_REGION", "us-east-1"), index_name=os.environ["OPENSEARCH_INDEX_NAME"],
-            top_k=int(os.environ.get("RETRIEVAL_TOP_K", "8")), min_score=float(os.environ.get("RETRIEVAL_MIN_SCORE", "0.6")),
+            top_k=int(os.environ.get("STUDY_RETRIEVAL_TOP_K", "10")),
+            min_score=float(os.environ.get("STUDY_RETRIEVAL_MIN_SCORE", "0.0")),
             document_ids=document_ids,
         )
         if not chunks:

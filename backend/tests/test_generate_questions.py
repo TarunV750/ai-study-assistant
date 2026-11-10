@@ -5,6 +5,8 @@ from unittest.mock import patch
 
 from functions.generate_questions import handler
 
+DOCUMENT_ID = "9b8c7d6e-5f4a-43b2-8c7d-6e5f4a3b2c1d"
+
 
 class GenerateQuestionsHandlerTests(unittest.TestCase):
     def setUp(self):
@@ -16,9 +18,11 @@ class GenerateQuestionsHandlerTests(unittest.TestCase):
     def test_returns_generated_material(self, retrieve, generate, _client):
         retrieve.return_value = [{"documentId": "9b8c7d6e-5f4a-43b2-8c7d-6e5f4a3b2c1d", "chunkId": "c1", "pageNumber": 1, "text": "text", "score": .9}]
         generate.return_value = {"title": "Course summary", "content": "Summary [Source 1]", "usage": {}}
-        response = handler.lambda_handler({"body": json.dumps({"mode": "summary"})}, None)
+        response = handler.lambda_handler({"body": json.dumps({"mode": "summary", "documentIds": [DOCUMENT_ID]})}, None)
         self.assertEqual(response["statusCode"], 200)
         self.assertFalse(json.loads(response["body"])["noAnswer"])
+        self.assertEqual(retrieve.call_args.kwargs["top_k"], 10)
+        self.assertEqual(retrieve.call_args.kwargs["min_score"], 0.0)
 
     def test_rejects_bad_mode(self):
         response = handler.lambda_handler({"body": json.dumps({"mode": "essay"})}, None)
@@ -28,11 +32,16 @@ class GenerateQuestionsHandlerTests(unittest.TestCase):
         response = handler.lambda_handler({"requestContext": {"http": {"method": "POST"}}, "headers": {"content-type": "text/plain"}, "body": "{}"}, None)
         self.assertEqual(response["statusCode"], 400)
 
+    def test_requires_selected_document(self):
+        response = handler.lambda_handler({"body": json.dumps({"mode": "summary"})}, None)
+        self.assertEqual(response["statusCode"], 400)
+        self.assertEqual(json.loads(response["body"])["error"]["field"], "documentIds")
+
     @patch.object(handler, "_client", return_value=object())
     @patch.object(handler, "generate_study_material", return_value={"title": "Course summary", "content": "Uncited material", "usage": {}})
     @patch.object(handler, "retrieve_chunks", return_value=[{"documentId": "9b8c7d6e-5f4a-43b2-8c7d-6e5f4a3b2c1d", "chunkId": "c1", "pageNumber": 1, "text": "text", "score": .9}])
     def test_rejects_uncited_study_output(self, retrieve, generate, client):
-        response = handler.lambda_handler({"body": json.dumps({"mode": "summary"})}, None)
+        response = handler.lambda_handler({"body": json.dumps({"mode": "summary", "documentIds": [DOCUMENT_ID]})}, None)
         self.assertEqual(response["statusCode"], 502)
         self.assertEqual(json.loads(response["body"])["error"]["code"], "UNGROUNDED_MODEL_RESPONSE")
 
