@@ -20,15 +20,15 @@ export function validatePdf(file) {
 
 export async function uploadPdf(file, onProgress) {
   validatePdf(file);
-  const instruction = await request("/upload-url", { method: "POST", body: JSON.stringify({ fileName: file.name, fileSize: file.size, contentType: file.type }) });
+  const instruction = await request("/upload-url", { method: "POST", body: JSON.stringify({ filename: file.name, fileSize: file.size, contentType: file.type }) });
   await new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", instruction.url);
+    xhr.open("POST", instruction.upload.url);
     xhr.upload.onprogress = (event) => event.lengthComputable && onProgress?.(Math.round((event.loaded / event.total) * 100));
     xhr.onload = () => xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error("S3 rejected the upload."));
     xhr.onerror = () => reject(new Error("The upload could not reach S3."));
     const form = new FormData();
-    Object.entries(instruction.fields).forEach(([key, value]) => form.append(key, value));
+    Object.entries(instruction.upload.fields).forEach(([key, value]) => form.append(key, value));
     form.append("file", file);
     xhr.send(form);
   });

@@ -86,6 +86,15 @@ class AskQuestionTests(unittest.TestCase):
         self.assertEqual(response["statusCode"], 400)
         self.assertEqual(json.loads(response["body"])["error"]["field"], "body")
 
+    def test_http_request_requires_json_content_type(self):
+        response = handler.lambda_handler({"requestContext": {"http": {"method": "POST"}}, "headers": {"content-type": "text/plain"}, "body": "{}"}, Context())
+        self.assertEqual(response["statusCode"], 400)
+        self.assertEqual(json.loads(response["body"])["error"]["field"], "contentType")
+
+    def test_rejects_oversized_body(self):
+        response = handler.lambda_handler({"body": " " * (handler.MAX_REQUEST_BODY_BYTES + 1)}, Context())
+        self.assertEqual(response["statusCode"], 400)
+
     @patch.object(handler, "retrieve_chunks")
     def test_rejects_invalid_question(self, retrieve):
         response = self.invoke({"question": ""})

@@ -7,7 +7,8 @@ The deployed development environment uses two stacks:
 - `foundation.yaml` creates the application roles, log groups, private document
   bucket, upload Lambda, PDF extraction/chunking Lambda, and Bedrock embedding
   Lambda, vector-indexing Lambda, plus the OpenSearch Serverless vector
-  collection and policies.
+  collection and policies. It also creates the HTTP API, grounded-answer and
+  study-tool Lambdas, document status API, access logs, and alarms.
 
 ## Secure upload flow
 
@@ -91,8 +92,8 @@ make backend-test
 make infra-validate AWS_PROFILE=YOUR_PROFILE AWS_REGION=us-east-1
 ```
 
-`backend-test` tests upload signing, PDF processing, chunking, and embedding
-behavior without contacting AWS.
+`backend-test` tests upload signing, processing, retrieval, grounded generation,
+study tools, citation behavior, and HTTP validation without contacting AWS.
 `infra-validate` performs local syntax/lint checks and AWS template validation.
 
 ## Deploy
@@ -112,10 +113,9 @@ make infra-deploy AWS_PROFILE=YOUR_PROFILE AWS_REGION=us-east-1
 The Make target:
 
 1. deploys the private artifact bucket;
-2. packages the upload, processing, embedding, and indexing Lambdas, including the pinned
-   `pypdf` runtime dependency;
+2. packages all seven Lambdas, including the pinned `pypdf` runtime dependency;
 3. uploads them under source-content hashes; and
-4. updates the foundation stack with all three artifact locations.
+4. updates the foundation stack with content-addressed artifact locations.
 
 For a production workflow, create and inspect a CloudFormation change set before
 execution. If an organization requires an IAM permissions boundary, pass

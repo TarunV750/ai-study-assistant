@@ -12,6 +12,7 @@ from shared.study import generate_study_material, retrieval_query, validate_stud
 
 LOGGER = logging.getLogger(__name__)
 LOGGER.setLevel(logging.INFO)
+MAX_REQUEST_BODY_BYTES = 8 * 1024
 _bedrock_client: Any | None = None
 
 
@@ -24,7 +25,7 @@ def _client() -> Any:
 
 
 def _response(status: int, body: dict[str, Any]) -> dict[str, Any]:
-    return {"statusCode": status, "headers": {"Content-Type": "application/json", "Cache-Control": "no-store"}, "body": json.dumps(body, separators=(",", ":"))}
+    return {"statusCode": status, "headers": {"Content-Type": "application/json", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}, "body": json.dumps(body, separators=(",", ":"))}
 
 
 def _payload(event: dict[str, Any]) -> dict[str, Any]:
@@ -32,6 +33,12 @@ def _payload(event: dict[str, Any]) -> dict[str, Any]:
         raise RetrievalValidationError("body", "Base64 request bodies are not supported.")
     body = event.get("body", event)
     if isinstance(body, str):
+        if len(body.encode("utf-8")) > MAX_REQUEST_BODY_BYTES:
+            raise RetrievalValidationError("body", "Request body is too large.")
+        if event.get("requestContext"):
+            content_type = (event.get("headers") or {}).get("content-type", "")
+            if content_type.split(";", 1)[0].strip().lower() != "application/json":
+                raise RetrievalValidationError("contentType", "Content-Type must be application/json.")
         try:
             body = json.loads(body)
         except json.JSONDecodeError as error:

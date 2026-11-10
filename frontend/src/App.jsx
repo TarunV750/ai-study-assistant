@@ -6,7 +6,8 @@ const STUDY_MODES = [
   ["questions", "Practice questions"], ["study-guide", "Study guide"],
 ];
 
-const statusLabel = (status) => ({ uploaded: "Processing", processing: "Processing", extracted: "Creating embeddings", embedded: "Indexing", indexed: "Ready", failed: "Needs attention" }[status] || status);
+const normalizedStatus = (status) => String(status || "").toLowerCase();
+const statusLabel = (status) => ({ uploaded: "Processing", processing: "Processing", extracted: "Creating embeddings", chunked: "Creating embeddings", embedded: "Indexing", indexed: "Ready", failed: "Needs attention" }[normalizedStatus(status)] || status);
 
 export default function App() {
   const [documents, setDocuments] = useState([]);
@@ -24,7 +25,7 @@ export default function App() {
     catch (error) { setNotice(error.message); }
   }, []);
   useEffect(() => { refresh(); }, [refresh]);
-  const readyDocuments = useMemo(() => documents.filter((doc) => doc.status === "indexed"), [documents]);
+  const readyDocuments = useMemo(() => documents.filter((doc) => normalizedStatus(doc.status) === "indexed"), [documents]);
 
   async function handleUpload(event) {
     const file = event.target.files?.[0];
@@ -36,7 +37,7 @@ export default function App() {
       for (let attempt = 0; attempt < 60; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, 5000));
         const doc = await getDocument(result.documentId);
-        if (["indexed", "failed"].includes(doc.status)) break;
+        if (["indexed", "failed"].includes(normalizedStatus(doc.status))) break;
       }
       await refresh();
     } catch (error) { setNotice(error.message); }
@@ -73,7 +74,7 @@ export default function App() {
       {notice && <div className="notice" role="status">{notice}<button onClick={() => setNotice("")} aria-label="Dismiss">×</button></div>}
       <section className="workspace">
         <aside><div className="section-title"><div><p className="eyebrow">Library</p><h2>Your sources</h2></div><button className="icon-button" onClick={refresh} aria-label="Refresh">↻</button></div>
-          <div className="document-list">{documents.length === 0 ? <div className="empty"><span>PDF</span><p>Your uploaded documents will appear here.</p></div> : documents.map((doc) => <button key={doc.documentId} className={`document ${selected.includes(doc.documentId) ? "selected" : ""}`} onClick={() => doc.status === "indexed" && toggleDocument(doc.documentId)} disabled={doc.status !== "indexed"}><span className="file-icon">PDF</span><span><strong>{doc.fileName || doc.originalFilename || "Course document"}</strong><small>{statusLabel(doc.status)}</small></span><i>{selected.includes(doc.documentId) ? "✓" : ""}</i></button>)}</div>
+          <div className="document-list">{documents.length === 0 ? <div className="empty"><span>PDF</span><p>Your uploaded documents will appear here.</p></div> : documents.map((doc) => <button key={doc.documentId} className={`document ${selected.includes(doc.documentId) ? "selected" : ""}`} onClick={() => normalizedStatus(doc.status) === "indexed" && toggleDocument(doc.documentId)} disabled={normalizedStatus(doc.status) !== "indexed"}><span className="file-icon">PDF</span><span><strong>{doc.filename || doc.fileName || doc.originalFilename || "Course document"}</strong><small>{statusLabel(doc.status)}</small></span><i>{selected.includes(doc.documentId) ? "✓" : ""}</i></button>)}</div>
           <p className="selection-note">{selected.length ? `${selected.length} source${selected.length > 1 ? "s" : ""} selected` : `${readyDocuments.length} ready · no filter selected`}</p>
         </aside>
         <section className="chat-panel"><div className="panel-heading"><div><p className="eyebrow">Ask</p><h2>Source-grounded chat</h2></div><span className="live-dot">Bedrock</span></div>

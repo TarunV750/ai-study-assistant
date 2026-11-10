@@ -24,6 +24,10 @@ class GenerateQuestionsHandlerTests(unittest.TestCase):
         response = handler.lambda_handler({"body": json.dumps({"mode": "essay"})}, None)
         self.assertEqual(response["statusCode"], 400)
 
+    def test_http_request_requires_json_content_type(self):
+        response = handler.lambda_handler({"requestContext": {"http": {"method": "POST"}}, "headers": {"content-type": "text/plain"}, "body": "{}"}, None)
+        self.assertEqual(response["statusCode"], 400)
+
 
 if __name__ == "__main__":
     unittest.main()

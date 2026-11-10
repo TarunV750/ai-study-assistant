@@ -52,7 +52,7 @@ def _log(event_name: str, **details: Any) -> None:
 def _response(status_code: int, body: dict[str, Any]) -> dict[str, Any]:
     return {
         "statusCode": status_code,
-        "headers": {"Content-Type": "application/json", "Cache-Control": "no-store"},
+        "headers": {"Content-Type": "application/json", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
         "body": json.dumps(body, ensure_ascii=False, separators=(",", ":")),
     }
 

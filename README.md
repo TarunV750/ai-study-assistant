@@ -3,8 +3,10 @@
 A portfolio project for uploading course PDFs and asking grounded questions about
 their contents using retrieval-augmented generation (RAG) on AWS.
 
-> **Current status:** Phase 8 chunk and embedding indexing is implemented and
-> deployed in the `dev` environment.
+> **Current status:** Phases 9–15 are implemented locally: semantic retrieval,
+> grounded RAG, HTTP APIs, the React workspace, study tools, citations, and
+> security/reliability hardening. Phase 8 remains the latest recorded `dev`
+> deployment until the next deployment phase.
 > The `dev` deployment status and live verification evidence are recorded in
 > [`docs/deployments/phase-8-dev.md`](docs/deployments/phase-8-dev.md).
 
@@ -72,9 +74,9 @@ flowchart LR
 ```
 
 Private storage, presigned PDF upload, event-driven extraction, page-aware
-chunking, Bedrock embeddings, the OpenSearch Serverless collection, and
-idempotent vector indexing are implemented. Semantic retrieval, API Gateway,
-grounded generation, and the React client remain later phases.
+chunking, Bedrock embeddings, OpenSearch vector indexing and retrieval,
+grounded generation, API Gateway, citations, study tools, and the React client
+are implemented.
 
 ## Prerequisites for later phases
 
@@ -97,13 +99,12 @@ make infra-lint
 make infra-validate AWS_REGION=us-east-1
 ```
 
-These commands run 42 unit tests across the Lambda handlers and shared chunking
+These commands run the backend unit suite across the Lambda handlers and shared
 logic, lint both CloudFormation templates, and ask AWS to validate them. Install the
 infrastructure development requirements before linting. Use Python 3.12 or
 newer for development work.
 
-Phase 8 design details are documented in
-[`docs/phase-8-vector-indexing.md`](docs/phase-8-vector-indexing.md).
+Phase design details are documented in the numbered files under [`docs/`](docs/).
 Deployment and verification commands are documented in
 [`infrastructure/README.md`](infrastructure/README.md). AWS deployment has to be
 performed with authenticated CLI credentials for the intended development
