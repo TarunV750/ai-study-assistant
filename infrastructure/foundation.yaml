@@ -75,6 +75,14 @@ Parameters:
     Type: String
     Description: S3 object key for the packaged index-document Lambda
 
+  AskQuestionArtifactKey:
+    Type: String
+    Description: S3 object key for the packaged ask-question Lambda
+
+  ManageDocumentsArtifactKey:
+    Type: String
+    Description: S3 object key for the packaged manage-documents Lambda
+
   FrontendOrigin:
     Type: String
     Default: http://localhost:5173
@@ -205,6 +213,40 @@ Parameters:
     Default: study-assistant-chunks
     AllowedPattern: "^(?![_-])[a-z][a-z0-9_-]*$"
     Description: Name of the OpenSearch vector index containing document chunks
+
+  GenerationModelId:
+    Type: String
+    Default: amazon.nova-micro-v1:0
+    AllowedPattern: "^[A-Za-z0-9._:-]+$"
+    Description: Amazon Bedrock text generation model ID
+
+  RetrievalTopK:
+    Type: Number
+    Default: 5
+    MinValue: 1
+    MaxValue: 10
+    Description: Maximum vector-search results used for one RAG request
+
+  RetrievalMinScore:
+    Type: Number
+    Default: 0.6
+    MinValue: 0
+    MaxValue: 1
+    Description: Initial minimum OpenSearch relevance score
+
+  MaxRagContextCharacters:
+    Type: Number
+    Default: 12000
+    MinValue: 1000
+    MaxValue: 50000
+    Description: Maximum retrieved source characters passed to generation
+
+  MaxAnswerTokens:
+    Type: Number
+    Default: 700
+    MinValue: 50
+    MaxValue: 4000
+    Description: Maximum model output tokens for an answer
 
 Conditions:
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
@@ -350,6 +392,17 @@ Resources:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub "/aws/lambda/${ProjectName}-${Environment}-manage-documents"
+      RetentionInDays: !Ref LogRetentionDays
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  ApiAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/apigateway/${ProjectName}-${Environment}"
       RetentionInDays: !Ref LogRetentionDays
       Tags:
         - Key: Project
@@ -825,7 +878,7 @@ Resources:
       Type: data
       Description: Grants the indexing role write access to the vector index
       Policy: !Sub >-
-        [{"Description":"Document vector write access","Rules":[{"ResourceType":"index","Resource":["index/${VectorCollectionName}/${VectorIndexName}"],"Permission":["aoss:CreateIndex","aoss:DescribeIndex","aoss:WriteDocument"]}],"Principal":["${IndexDocumentRole.Arn}"]}]
+        [{"Description":"Document vector write access","Rules":[{"ResourceType":"index","Resource":["index/${VectorCollectionName}/${VectorIndexName}"],"Permission":["aoss:CreateIndex","aoss:DescribeIndex","aoss:WriteDocument"]}],"Principal":["${IndexDocumentRole.Arn}"]},{"Description":"RAG vector read access","Rules":[{"ResourceType":"index","Resource":["index/${VectorCollectionName}/${VectorIndexName}"],"Permission":["aoss:DescribeIndex","aoss:ReadDocument"]}],"Principal":["${AskQuestionRole.Arn}"]}]
 
   VectorCollection:
     Type: AWS::OpenSearchServerless::Collection
@@ -874,6 +927,59 @@ Resources:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Resource: !Sub "${AskQuestionLogGroup.Arn}:*"
+        - PolicyName: InvokeRagModels
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: bedrock:InvokeModel
+                Resource:
+                  - !Sub >-
+                    arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${EmbeddingModelId}
+                  - !Sub >-
+                    arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${GenerationModelId}
+        - PolicyName: ReadVectorIndex
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: aoss:APIAccessAll
+                Resource: !GetAtt VectorCollection.Arn
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  AskQuestionFunction:
+    Type: AWS::Lambda::Function
+    DependsOn:
+      - AskQuestionLogGroup
+      - VectorDataAccessPolicy
+    Properties:
+      FunctionName: !Sub "${ProjectName}-${Environment}-ask-question"
+      Description: Retrieves relevant chunks and generates a grounded Bedrock answer
+      Architectures:
+        - arm64
+      Code:
+        S3Bucket: !Ref LambdaArtifactBucketName
+        S3Key: !Ref AskQuestionArtifactKey
+      Environment:
+        Variables:
+          EMBEDDING_MODEL_ID: !Ref EmbeddingModelId
+          EMBEDDING_DIMENSIONS: !Ref EmbeddingDimensions
+          GENERATION_MODEL_ID: !Ref GenerationModelId
+          OPENSEARCH_COLLECTION_ENDPOINT: !GetAtt VectorCollection.CollectionEndpoint
+          OPENSEARCH_INDEX_NAME: !Ref VectorIndexName
+          RETRIEVAL_TOP_K: !Ref RetrievalTopK
+          RETRIEVAL_MIN_SCORE: !Ref RetrievalMinScore
+          MAX_RAG_CONTEXT_CHARACTERS: !Ref MaxRagContextCharacters
+          MAX_ANSWER_TOKENS: !Ref MaxAnswerTokens
+      Handler: handler.lambda_handler
+      MemorySize: 512
+      Role: !GetAtt AskQuestionRole.Arn
+      Runtime: python3.12
+      Timeout: 29
       Tags:
         - Key: Project
           Value: !Ref ProjectName
@@ -936,11 +1042,173 @@ Resources:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Resource: !Sub "${ManageDocumentsLogGroup.Arn}:*"
+        - PolicyName: ListDocumentStatuses
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt DocumentsBucket.Arn
+                Condition:
+                  StringLike:
+                    s3:prefix: processing/*
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource:
+                  - !Sub "${DocumentsBucket.Arn}/processing/*/status.json"
+                  - !Sub "${DocumentsBucket.Arn}/uploads/*/document.pdf"
       Tags:
         - Key: Project
           Value: !Ref ProjectName
         - Key: Environment
           Value: !Ref Environment
+
+  ManageDocumentsFunction:
+    Type: AWS::Lambda::Function
+    DependsOn:
+      - ManageDocumentsLogGroup
+      - DocumentsBucketPolicy
+    Properties:
+      FunctionName: !Sub "${ProjectName}-${Environment}-manage-documents"
+      Description: Lists uploaded documents and returns processing status
+      Architectures:
+        - arm64
+      Code:
+        S3Bucket: !Ref LambdaArtifactBucketName
+        S3Key: !Ref ManageDocumentsArtifactKey
+      Environment:
+        Variables:
+          DOCUMENTS_BUCKET_NAME: !Ref DocumentsBucket
+      Handler: handler.lambda_handler
+      MemorySize: 256
+      Role: !GetAtt ManageDocumentsRole.Arn
+      Runtime: python3.12
+      Timeout: 15
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  StudyApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub "${ProjectName}-${Environment}-api"
+      Description: RESTful HTTP API for the AI Study Assistant
+      ProtocolType: HTTP
+      CorsConfiguration:
+        AllowHeaders:
+          - Content-Type
+        AllowMethods:
+          - GET
+          - POST
+          - OPTIONS
+        AllowOrigins:
+          - !Ref FrontendOrigin
+        MaxAge: 300
+      Tags:
+        Project: !Ref ProjectName
+        Environment: !Ref Environment
+
+  CreateUploadUrlIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref StudyApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt CreateUploadUrlFunction.Arn
+      PayloadFormatVersion: "2.0"
+      TimeoutInMillis: 10000
+
+  AskQuestionIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref StudyApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt AskQuestionFunction.Arn
+      PayloadFormatVersion: "2.0"
+      TimeoutInMillis: 30000
+
+  ManageDocumentsIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref StudyApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt ManageDocumentsFunction.Arn
+      PayloadFormatVersion: "2.0"
+      TimeoutInMillis: 15000
+
+  CreateUploadUrlRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref StudyApi
+      RouteKey: POST /upload-url
+      Target: !Sub "integrations/${CreateUploadUrlIntegration}"
+
+  AskQuestionRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref StudyApi
+      RouteKey: POST /ask
+      Target: !Sub "integrations/${AskQuestionIntegration}"
+
+  ListDocumentsRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref StudyApi
+      RouteKey: GET /documents
+      Target: !Sub "integrations/${ManageDocumentsIntegration}"
+
+  GetDocumentRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref StudyApi
+      RouteKey: GET /documents/{documentId}
+      Target: !Sub "integrations/${ManageDocumentsIntegration}"
+
+  StudyApiStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref StudyApi
+      StageName: $default
+      AutoDeploy: true
+      AccessLogSettings:
+        DestinationArn: !GetAtt ApiAccessLogGroup.Arn
+        Format: >-
+          {"requestId":"$context.requestId","routeKey":"$context.routeKey","status":"$context.status","responseLength":"$context.responseLength","integrationError":"$context.integrationErrorMessage"}
+      DefaultRouteSettings:
+        DetailedMetricsEnabled: true
+        ThrottlingBurstLimit: 20
+        ThrottlingRateLimit: 10
+      Tags:
+        Project: !Ref ProjectName
+        Environment: !Ref Environment
+
+  AllowApiToCreateUploadUrls:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref CreateUploadUrlFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub >-
+        arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${StudyApi}/*/POST/upload-url
+
+  AllowApiToAskQuestions:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref AskQuestionFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub >-
+        arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${StudyApi}/*/POST/ask
+
+  AllowApiToManageDocuments:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref ManageDocumentsFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub >-
+        arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${StudyApi}/*/GET/documents*
 
 Outputs:
   DocumentsBucketName:
@@ -986,6 +1254,18 @@ Outputs:
   IndexDocumentFunctionArn:
     Description: ARN of the document indexing Lambda
     Value: !GetAtt IndexDocumentFunction.Arn
+
+  AskQuestionFunctionName:
+    Description: Lambda that performs grounded question answering
+    Value: !Ref AskQuestionFunction
+
+  ManageDocumentsFunctionName:
+    Description: Lambda that lists documents and processing status
+    Value: !Ref ManageDocumentsFunction
+
+  ApiEndpoint:
+    Description: HTTPS endpoint for the study-assistant HTTP API
+    Value: !GetAtt StudyApi.ApiEndpoint
 
   VectorCollectionName:
     Description: OpenSearch Serverless vector collection name
