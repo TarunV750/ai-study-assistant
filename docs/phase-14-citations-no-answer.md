@@ -2,6 +2,8 @@
 
 Every newly indexed chunk now carries the original PDF filename along with its document, page, and chunk identifiers. Retrieval returns that provenance, so the API and React interface can display human-readable filename and page citations.
 
+Because filename provenance adds a field to an index that may already exist, the indexing role has narrowly scoped `aoss:UpdateIndex` permission for that one index. This permits OpenSearch to extend the mapping without granting collection administration.
+
 The answer path has two independent grounding checks:
 
 1. Retrieval returns no context when no passage reaches the configurable relevance threshold. The API then returns a deterministic no-answer message without calling a generation model.

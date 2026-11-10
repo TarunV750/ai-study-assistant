@@ -882,7 +882,7 @@ Resources:
       Type: data
       Description: Grants the indexing role write access to the vector index
       Policy: !Sub >-
-        [{"Description":"Document vector write access","Rules":[{"ResourceType":"index","Resource":["index/${VectorCollectionName}/${VectorIndexName}"],"Permission":["aoss:CreateIndex","aoss:DescribeIndex","aoss:WriteDocument"]}],"Principal":["${IndexDocumentRole.Arn}"]},{"Description":"RAG vector read access","Rules":[{"ResourceType":"index","Resource":["index/${VectorCollectionName}/${VectorIndexName}"],"Permission":["aoss:DescribeIndex","aoss:ReadDocument"]}],"Principal":["${AskQuestionRole.Arn}","${GenerateQuestionsRole.Arn}"]}]
+        [{"Description":"Document vector write access","Rules":[{"ResourceType":"index","Resource":["index/${VectorCollectionName}/${VectorIndexName}"],"Permission":["aoss:CreateIndex","aoss:DescribeIndex","aoss:UpdateIndex","aoss:WriteDocument"]}],"Principal":["${IndexDocumentRole.Arn}"]},{"Description":"RAG vector read access","Rules":[{"ResourceType":"index","Resource":["index/${VectorCollectionName}/${VectorIndexName}"],"Permission":["aoss:DescribeIndex","aoss:ReadDocument"]}],"Principal":["${AskQuestionRole.Arn}","${GenerateQuestionsRole.Arn}"]}]
 
   VectorCollection:
     Type: AWS::OpenSearchServerless::Collection

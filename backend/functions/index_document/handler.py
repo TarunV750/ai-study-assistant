@@ -52,6 +52,17 @@ class OpenSearchRequestError(RuntimeError):
         self.response_body = response_body
 
 
+class OpenSearchBulkError(RuntimeError):
+    """OpenSearch rejected a bulk item; details exclude the submitted document body."""
+
+    def __init__(self, error_type: str, reason: str) -> None:
+        safe_type = error_type[:120] if error_type else "unknown_error"
+        safe_reason = reason[:500] if reason else "No rejection reason was returned."
+        super().__init__(f"OpenSearch bulk item failed ({safe_type}): {safe_reason}")
+        self.error_type = safe_type
+        self.reason = safe_reason
+
+
 def _get_s3_client() -> Any:
     global _s3_client
     if _s3_client is None:
@@ -397,12 +408,29 @@ def _bulk_index(
             content_type="application/x-ndjson",
         )
         items = response.get("items")
-        if (
-            response.get("errors") is not False
-            or not isinstance(items, list)
-            or len(items) != len(batch)
-        ):
-            raise RuntimeError("OpenSearch bulk indexing reported one or more failures.")
+        if not isinstance(items, list) or len(items) != len(batch):
+            raise OpenSearchBulkError(
+                "invalid_bulk_response", "OpenSearch returned an unexpected item count."
+            )
+        if response.get("errors") is not False:
+            for item in items:
+                operation = item.get("index", {}) if isinstance(item, dict) else {}
+                error = operation.get("error", {}) if isinstance(operation, dict) else {}
+                if isinstance(error, dict):
+                    reason = error.get("reason")
+                    caused_by = error.get("caused_by")
+                    if isinstance(caused_by, dict) and caused_by.get("reason"):
+                        reason = (
+                            f"{reason or 'Rejected'}; caused by "
+                            f"{caused_by.get('type', 'unknown')}: {caused_by['reason']}"
+                        )
+                    raise OpenSearchBulkError(
+                        str(error.get("type", "unknown_error")),
+                        str(reason or "Rejected by OpenSearch."),
+                    )
+            raise OpenSearchBulkError(
+                "unknown_error", "OpenSearch reported a failed bulk item."
+            )
 
 
 def _put_json(s3_client: Any, *, bucket: str, key: str, body: dict[str, Any]) -> None:

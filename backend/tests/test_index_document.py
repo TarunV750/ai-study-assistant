@@ -284,6 +284,34 @@ class IndexDocumentTests(unittest.TestCase):
 
         self.assertEqual(self.s3.puts, [])
 
+    def test_bulk_rejection_exposes_safe_opensearch_reason(self):
+        self.request_patch.stop()
+        response = {
+            "errors": True,
+            "items": [
+                {
+                    "index": {
+                        "status": 400,
+                        "error": {
+                            "type": "mapper_parsing_exception",
+                            "reason": "failed to parse field [filename]",
+                        },
+                    }
+                }
+            ],
+        }
+        self.request_patch = patch.object(
+            handler, "_signed_opensearch_request", return_value=response
+        )
+        self.request_patch.start()
+
+        with self.assertRaisesRegex(
+            handler.OpenSearchBulkError, "mapper_parsing_exception"
+        ):
+            handler.lambda_handler(event_for(), Context())
+
+        self.assertEqual(self.s3.puts, [])
+
 
 if __name__ == "__main__":
     unittest.main()
