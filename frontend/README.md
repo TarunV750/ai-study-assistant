@@ -1,12 +1,12 @@
-# Frontend
+# CourseLens AI frontend
 
-This directory will contain the React client. It is intentionally unimplemented
-in Phase 1; frontend tooling and application code will be added in Phase 12.
+React and Vite client for uploads, document selection, grounded chat, and study tools.
 
-Planned responsibilities:
+```bash
+cp .env.example .env.local
+# Set VITE_API_BASE_URL in .env.local
+npm install
+npm run dev
+```
 
-- Request and use presigned upload URLs
-- Show upload and processing state
-- List and select uploaded documents
-- Provide chat and study-tool interfaces
-- Render grounded answers, sources, loading states, and errors
+Only the public API endpoint belongs in the frontend environment. Never place AWS credentials here.
