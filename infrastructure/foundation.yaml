@@ -1169,7 +1169,7 @@ Resources:
       ProtocolType: HTTP
       CorsConfiguration:
         AllowHeaders:
-          - Content-Type
+          - content-type
         AllowMethods:
           - GET
           - POST
@@ -1259,7 +1259,8 @@ Resources:
       StageName: $default
       AutoDeploy: true
       AccessLogSettings:
-        DestinationArn: !GetAtt ApiAccessLogGroup.Arn
+        DestinationArn: !Sub >-
+          arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${ApiAccessLogGroup}
         Format: >-
           {"requestId":"$context.requestId","routeKey":"$context.routeKey","status":"$context.status","responseLength":"$context.responseLength","integrationError":"$context.integrationErrorMessage"}
       DefaultRouteSettings:

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import ReactMarkdown from "react-markdown";
 import { askQuestion, createStudyMaterial, getDocument, listDocuments, uploadPdf } from "./api.js";
 
 const STUDY_MODES = [
@@ -8,6 +9,11 @@ const STUDY_MODES = [
 
 const normalizedStatus = (status) => String(status || "").toLowerCase();
 const statusLabel = (status) => ({ uploaded: "Processing", processing: "Processing", extracted: "Creating embeddings", chunked: "Creating embeddings", embedded: "Indexing", indexed: "Ready", failed: "Needs attention" }[normalizedStatus(status)] || status);
+const MARKDOWN_ELEMENTS = ["p", "h1", "h2", "h3", "h4", "ul", "ol", "li", "strong", "em", "code", "pre", "br"];
+
+function SafeMarkdown({ children }) {
+  return <ReactMarkdown allowedElements={MARKDOWN_ELEMENTS}>{children}</ReactMarkdown>;
+}
 
 export default function App() {
   const [documents, setDocuments] = useState([]);
@@ -82,11 +88,11 @@ export default function App() {
           <p className="selection-note">{selected.length ? `${selected.length} source${selected.length > 1 ? "s" : ""} selected` : `${readyDocuments.length} ready · no filter selected`}</p>
         </aside>
         <section className="chat-panel"><div className="panel-heading"><div><p className="eyebrow">Ask</p><h2>Source-grounded chat</h2></div><span className="live-dot">Bedrock</span></div>
-          <div className="messages">{messages.map((message, index) => <article key={index} className={`message ${message.role}`}><span className="avatar">{message.role === "user" ? "You" : "AI"}</span><div><p>{message.text}</p>{message.sources?.length > 0 && <div className="sources">{message.sources.map((source) => <span key={source.chunkId}>Source {source.sourceNumber} · {source.filename || "PDF"} p. {source.pageNumber}</span>)}</div>}</div></article>)}{busy === "ask" && <article className="message assistant"><span className="avatar">AI</span><div className="thinking"><i /><i /><i /></div></article>}</div>
+          <div className="messages">{messages.map((message, index) => <article key={index} className={`message ${message.role}`}><span className="avatar">{message.role === "user" ? "You" : "AI"}</span><div>{message.role === "assistant" ? <SafeMarkdown>{message.text}</SafeMarkdown> : <p>{message.text}</p>}{message.sources?.length > 0 && <div className="sources">{message.sources.map((source) => <span key={source.chunkId}>Source {source.sourceNumber} · {source.filename || "PDF"} p. {source.pageNumber}</span>)}</div>}</div></article>)}{busy === "ask" && <article className="message assistant"><span className="avatar">AI</span><div className="thinking"><i /><i /><i /></div></article>}</div>
           <form className="ask-form" onSubmit={submitQuestion}><textarea value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Ask about a concept, definition, or example…" maxLength={2000} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form.requestSubmit(); } }} /><button disabled={Boolean(busy) || !question.trim()}>Ask →</button></form>
         </section>
       </section>
-      <section className="study-section"><div className="section-title"><div><p className="eyebrow">Study tools</p><h2>Build your next study session</h2></div><p>Generated only from the sources you choose.</p></div><div className="study-controls"><div>{STUDY_MODES.map(([value, label]) => <button key={value} className={studyMode === value ? "active" : ""} onClick={() => setStudyMode(value)}>{label}</button>)}</div><button className="generate" onClick={generateStudyMaterial} disabled={Boolean(busy) || selected.length === 0}>{busy === "study" ? "Generating…" : "Generate"}</button></div>{selected.length === 0 && readyDocuments.length > 0 && <p className="selection-note">Select one or more Ready documents in your library to enable study tools.</p>}{studyOutput && <article className="study-output"><p className="eyebrow">{studyOutput.title}</p><div>{studyOutput.content}</div>{studyOutput.sources?.length > 0 && <p className="source-line">Based on {studyOutput.sources.length} retrieved source passages.</p>}</article>}</section>
+      <section className="study-section"><div className="section-title"><div><p className="eyebrow">Study tools</p><h2>Build your next study session</h2></div><p>Generated only from the sources you choose.</p></div><div className="study-controls"><div>{STUDY_MODES.map(([value, label]) => <button key={value} className={studyMode === value ? "active" : ""} onClick={() => setStudyMode(value)}>{label}</button>)}</div><button className="generate" onClick={generateStudyMaterial} disabled={Boolean(busy) || selected.length === 0}>{busy === "study" ? "Generating…" : "Generate"}</button></div>{selected.length === 0 && readyDocuments.length > 0 && <p className="selection-note">Select one or more Ready documents in your library to enable study tools.</p>}{studyOutput && <article className="study-output"><p className="eyebrow">{studyOutput.title}</p><SafeMarkdown>{studyOutput.content}</SafeMarkdown>{studyOutput.sources?.length > 0 && <p className="source-line">Based on {studyOutput.sources.length} retrieved source passages.</p>}</article>}</section>
     </main><footer><span>CourseLens AI</span><p>Built on AWS · Answers remain grounded in your uploaded material.</p></footer>
   </div>;
 }
