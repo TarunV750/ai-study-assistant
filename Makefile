@@ -46,7 +46,7 @@ MANAGE_DOCUMENTS_KEY := lambdas/manage-documents/$(MANAGE_DOCUMENTS_HASH).zip
 MANAGE_DOCUMENTS_ZIP := build/manage-documents.zip
 BACKEND_TEST_DEPS := build/backend-test-deps
 
-.PHONY: backend-deps backend-test frontend-test test infra-syntax infra-lint infra-validate artifacts-deploy \
+.PHONY: backend-deps backend-test frontend-test test e2e-smoke infra-syntax infra-lint infra-validate artifacts-deploy \
 	create-upload-package process-document-package generate-embeddings-package index-document-package \
 	ask-question-package generate-questions-package manage-documents-package \
 	lambda-package lambda-upload \
@@ -68,6 +68,9 @@ frontend-test:
 	cd frontend && npm test
 
 test: backend-test frontend-test
+
+e2e-smoke:
+	$(PYTHON) scripts/e2e_smoke.py
 
 infra-syntax:
 	@ruby -e "require 'yaml'; YAML.parse_file('$(TEMPLATE)'); YAML.parse_file('$(ARTIFACTS_TEMPLATE)'); puts 'YAML syntax is valid.'"
