@@ -25,11 +25,12 @@ deterministic IDs to bulk-write searchable documents and metadata. The Amazon
 OpenSearch Serverless collection, security policies, index creation, and write
 path are implemented.
 
-For questions, an API Lambda embeds the query, runs semantic vector search in
-OpenSearch Serverless, builds a prompt from relevant chunks, and invokes a
-Bedrock generation model. The response returns both an answer and source
-metadata. Concrete models, dimensions, thresholds, and chunking values will be
-chosen and tested in their corresponding phases.
+For questions, an API Lambda embeds the query with Titan Text Embeddings V2,
+runs semantic vector search in OpenSearch Serverless, builds a prompt from
+relevant chunks, and invokes Nova Micro through Bedrock Converse. The response
+returns the answer plus only the filename/page sources actually cited by the
+model. A separate study Lambda creates summaries, concepts, practice questions,
+and study guides from explicitly selected documents.
 
 ## Design principles
 
@@ -74,9 +75,22 @@ OCUs. It uses the next-generation group's required high-availability behavior,
 an AWS-owned encryption key, the standard vector-index path, and an
 authenticated public API endpoint. Public network
 reachability does not grant data access: the data policy names only the
-indexing role. That role receives the required collection-scoped IAM data-plane
-permission, while the data policy narrows it to create, describe, and write one
-exact index.
+indexing, question, and study roles. Each role receives the required
+collection-scoped IAM data-plane permission, while the data policy separates
+write/update access from read-only retrieval on one exact index.
+
+## Implemented API and grounding boundary
+
+API Gateway exposes upload instructions, document status, question answering,
+and study generation. Exact-origin CORS, throttling, access logs, body limits,
+JSON content checks, and safe error responses protect the HTTP boundary. The
+development API is intentionally unauthenticated and is not a multi-tenant
+production boundary.
+
+The RAG system uses a stricter relevance floor for narrow questions and a broad
+top-10 policy for study material from explicitly selected documents. Retrieved
+text is delimited as untrusted data. Generated output must contain valid source
+markers before the API returns it.
 
 ## Implemented indexing boundary
 
