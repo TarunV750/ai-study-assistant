@@ -10,9 +10,8 @@ Bedrock embeddings and generation, OpenSearch Serverless vector retrieval,
 least-privilege IAM, repeatable CloudFormation, observable failures, and an
 automated test suite spanning backend, frontend, and infrastructure contracts.
 
-> **Status:** Complete through Phase 20. The development backend is deployed and
-> verified end to end in `us-east-1`; the React client runs locally against that
-> API. See the [portfolio case study](docs/portfolio.md),
+
+> See the [portfolio case study](docs/portfolio.md),
 > [deployment evidence](docs/deployments/phase-17-dev.md), and
 > [interview guide](docs/interview-guide.md).
 
