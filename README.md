@@ -10,10 +10,11 @@ Bedrock embeddings and generation, OpenSearch Serverless vector retrieval,
 least-privilege IAM, repeatable CloudFormation, observable failures, and an
 automated test suite spanning backend, frontend, and infrastructure contracts.
 
-
-> See the [portfolio case study](docs/portfolio.md),
+> **Status:** Complete through Phase 19. The development backend is deployed and
+> verified end to end in `us-east-1`; the React client runs locally against that
+> API. See the [portfolio case study](docs/portfolio.md),
 > [deployment evidence](docs/deployments/phase-17-dev.md), and
-> [interview guide](docs/interview-guide.md).
+> [engineering review](docs/phase-19-engineering-review.md).
 
 ![CourseLens AI workspace](docs/screenshots/course-lens-workspace.png)
 
@@ -154,7 +155,6 @@ The non-sensitive Phase 2 record remains in
 - [Portfolio case study](docs/portfolio.md)
 - [Architecture](docs/architecture.md)
 - [Security, cost, and complexity review](docs/phase-19-engineering-review.md)
-- [Interview-ready explanation](docs/interview-guide.md)
 - [Incremental roadmap](docs/roadmap.md)
 
 ## Security baseline

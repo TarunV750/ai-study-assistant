@@ -1,6 +1,6 @@
 # Incremental Delivery Roadmap
 
-All 20 phases are complete. Each phase has its own implementation, verification,
+All 19 phases are complete. Each phase has its own implementation, verification,
 debugging record, and Git commit.
 
 1. ✅ **Repository and project structure** — establish boundaries and conventions.
@@ -22,4 +22,3 @@ debugging record, and Git commit.
 17. ✅ **AWS deployment and end-to-end testing**.
 18. ✅ **Portfolio documentation and screenshots**.
 19. ✅ **Complexity, security, cost, and bug review**.
-20. ✅ **Interview-ready technical explanation**.
