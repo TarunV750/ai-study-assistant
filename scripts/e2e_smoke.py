@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -78,7 +79,10 @@ def main() -> int:
     require(status == 200 and upload.get("upload", {}).get("method") == "POST", "Upload instruction contract failed.")
     require(upload.get("expiresIn") == 300, "Presigned upload expiry changed unexpectedly.")
 
-    question = os.environ.get("SMOKE_QUESTION", "What are the main topics in this document?")
+    filename = document.get("filename", "course material")
+    filename_topic = re.sub(r"[^A-Za-z0-9]+", " ", filename.rsplit(".", 1)[0]).strip()
+    default_question = f"What does this document explain about {filename_topic or 'the course material'}?"
+    question = os.environ.get("SMOKE_QUESTION", default_question)
     status, _, answer = request(
         base_url,
         "/ask",
